@@ -30,6 +30,7 @@ def procesar_mercadopago(archivo_pdf):
         # Abrir y leer el archivo PDF
         reader = PyPDF2.PdfReader(io.BytesIO(archivo_pdf.read()))
         texto = "".join(page.extract_text() + "\n" for page in reader.pages)
+        
         lineas = texto.splitlines()
 
         # Variables para almacenar la información
@@ -38,15 +39,36 @@ def procesar_mercadopago(archivo_pdf):
         movimientos = []
         nombre_titular = None
         cvu = None
+        periodo = None
 
         # Procesar líneas
         i = 0
         while i < len(lineas):
             linea = lineas[i].strip()
+            
+            # Ignorar líneas vacías
+            if not linea:
+                i += 1
+                continue
+
+            # Ignorar líneas vacías después de la limpieza
+            if not linea:
+                i += 1
+                continue
 
             # Extraer nombre del titular (primera línea después de "RESUMEN DE CUENTA")
-            if i > 0 and lineas[i - 1].strip() == "RESUMEN DE CUENTA" and linea:
-                nombre_titular = linea
+            # La línea anterior puede tener basura como "1/61RESUMEN DE CUENTA"
+            if i > 0 and "RESUMEN DE CUENTA" in lineas[i - 1] and linea:
+                # Nos aseguramos de no sobreescribir si ya lo tenemos (por si aparece otra vez más adelante)
+                if not nombre_titular:
+                    nombre_titular = linea
+
+            # Extraer Período (Formato: "Del 1 al ... Periodo:")
+            if "Periodo:" in linea or "Período:" in linea:
+                 # Capturar lo que está ANTES de "Periodo:"
+                 match_periodo = re.search(r"(.*)(Periodo:|Período:)", linea, re.IGNORECASE)
+                 if match_periodo:
+                     periodo = match_periodo.group(1).strip()
 
             # Extraer CVU
             if linea.startswith("CVU:"):
@@ -66,19 +88,40 @@ def procesar_mercadopago(archivo_pdf):
                 if saldo_match:
                     saldo_final = saldo_match.group(1)
 
-            # Extraer movimientos (líneas que empiezan con fecha)
-            if re.match(r"^\d{2}-\d{2}-\d{4}", linea):
-                # Línea actual puede ser el inicio de un movimiento
+            match_fecha_inicio = re.search(r"(\d{2}-\d{2}-\d{4})", linea)
+            
+            # Solo consideramos que es inicio de movimiento si la fecha aparece al principio (primeros 20 chars)
+            if match_fecha_inicio and match_fecha_inicio.start() < 20:
+                # Limpiar basura anterior a la fecha
+                linea = linea[match_fecha_inicio.start():]
                 linea_movimiento = linea
 
                 # Verificar si la línea actual contiene los montos
-                if not re.search(r"\$\s*-?[\d,]+\.?\d*", linea_movimiento):
-                    # Si no tiene montos, combinar con la siguiente línea
+                lineas_extra = 0
+                while not re.search(r"\$\s*-?[\d,]+\.?\d*", linea_movimiento) and lineas_extra < 20:
                     if i + 1 < len(lineas):
-                        linea_siguiente = lineas[i + 1].strip()
-                        linea_movimiento = linea + " " + linea_siguiente
-                        i += 1  # Saltar la siguiente línea ya que la procesamos
+                        linea_siguiente_check = lineas[i + 1].strip()
+                        
+                        # Detectar y saltar encabezados de página
+                        if re.match(r"^\d+/\d+\s*Fecha", linea_siguiente_check):
+                            i += 1
+                            continue
+                        
+                        if re.match(r"^\d+\s*/\s*\d+$", linea_siguiente_check):
+                            i += 1
+                            continue
 
+                        # Verificar inicio nuevo movimiento
+                        match_fecha_next = re.search(r"(\d{2}-\d{2}-\d{4})", linea_siguiente_check)
+                        if match_fecha_next and match_fecha_next.start() < 20:
+                            break 
+                            
+                        linea_movimiento += " " + linea_siguiente_check
+                        i += 1
+                        lineas_extra += 1
+                    else:
+                        break
+                
                 # Limpiar la línea: quitar saltos de línea internos y espacios extra
                 linea_movimiento = " ".join(linea_movimiento.split())
 
@@ -130,31 +173,36 @@ def procesar_mercadopago(archivo_pdf):
 
                         # Extraer descripción (todo después de la fecha hasta antes del ID y montos)
                         # Remover la fecha del inicio
-                        resto_linea = linea_movimiento[
-                            10:
-                        ].strip()  # Quitar los primeros 10 caracteres (fecha)
+                        resto_linea = linea_movimiento[10:].strip()  # Quitar los primeros 10 caracteres (fecha)
 
-                        # Buscar el ID (número largo) para separar descripción de montos
-                        descripcion_match = re.search(
-                            r"^(.+?)\s*\d{10,}\s*", resto_linea
-                        )
-                        if descripcion_match:
-                            descripcion = descripcion_match.group(1).strip()
+                        # Extraer descripción (todo después de la fecha hasta antes del ID y montos)
+                        # Remover la fecha del inicio
+                        resto_linea = linea_movimiento[10:].strip()  # Quitar los primeros 10 caracteres (fecha)
+
+                        # Buscar el ID (número largo de 10 o más dígitos)
+                        match_id = re.search(r"(\d{10,})", resto_linea)
+                        
+                        if match_id:
+                            # Cortamos todo lo que está ANTES de ese ID
+                            inicio_id = match_id.start()
+                            descripcion = resto_linea[:inicio_id].strip()
+                            # Limpieza extra: a veces quedan comas al final
+                            if descripcion.endswith(","):
+                                descripcion = descripcion[:-1].strip()
                         else:
-                            # Fallback: tomar todo hasta antes de los montos
-                            descripcion_match = re.search(
-                                r"^(.+?)\s*[\d.,]+", resto_linea
-                            )
-                            if descripcion_match:
-                                descripcion = descripcion_match.group(1).strip()
+                            # Fallback...
+                            if importe:
+                                importe_clean = importe.replace("-", "").strip()
+                                idx_importe = resto_linea.find(importe_clean)
+                                if idx_importe != -1: 
+                                    sub = resto_linea[:idx_importe]
+                                    if sub.strip().endswith("$"):
+                                        sub = sub.strip()[:-1]
+                                    descripcion = sub.strip()
+                                else:
+                                    descripcion = resto_linea
                             else:
-                                # Último fallback: tomar las primeras palabras
-                                partes = resto_linea.split()
-                                descripcion = (
-                                    " ".join(partes[:-3])
-                                    if len(partes) > 3
-                                    else resto_linea
-                                )
+                                descripcion = resto_linea
 
                         movimiento = {
                             "Fecha": fecha,
@@ -175,28 +223,32 @@ def procesar_mercadopago(archivo_pdf):
                                 importe = "-" + importe
 
                         # Extraer descripción
-                        resto_linea = linea_movimiento[
-                            10:
-                        ].strip()  # Quitar los primeros 10 caracteres (fecha)
+                        resto_linea = linea_movimiento[10:].strip()  # Quitar los primeros 10 caracteres (fecha)
 
-                        descripcion_match = re.search(
-                            r"^(.+?)\s*\d{10,}\s*", resto_linea
-                        )
-                        if descripcion_match:
-                            descripcion = descripcion_match.group(1).strip()
+                        # Intento 1: Buscar ID de 10+ dígitos
+                        match_id = re.search(r"(\d{10,})", resto_linea)
+                        
+                        if match_id:
+                            # Cortamos todo lo que está ANTES de ese ID
+                            inicio_id = match_id.start()
+                            descripcion = resto_linea[:inicio_id].strip()
+                            # Limpieza extra
+                            if descripcion.endswith(","):
+                                descripcion = descripcion[:-1].strip()
                         else:
-                            descripcion_match = re.search(
-                                r"^(.+?)\s*[\d.,]+", resto_linea
-                            )
-                            if descripcion_match:
-                                descripcion = descripcion_match.group(1).strip()
+                            # Fallback: usar el importe como corte
+                            if importe:
+                                importe_clean = importe.replace("-", "").strip()
+                                idx_importe = resto_linea.find(importe_clean)
+                                if idx_importe != -1:
+                                    sub = resto_linea[:idx_importe]
+                                    if sub.strip().endswith("$"):
+                                        sub = sub.strip()[:-1]
+                                    descripcion = sub.strip()
+                                else:
+                                    descripcion = resto_linea
                             else:
-                                partes = resto_linea.split()
-                                descripcion = (
-                                    " ".join(partes[:-2])
-                                    if len(partes) > 2
-                                    else resto_linea
-                                )
+                                descripcion = resto_linea
 
                         movimiento = {
                             "Fecha": fecha,
@@ -270,162 +322,287 @@ def procesar_mercadopago(archivo_pdf):
                     debitos["Importe"] = debitos["Importe"].abs()
 
                 # Nombre de la hoja
-                nombre_hoja = (
-                    f"MercadoPago {nombre_titular[:15] if nombre_titular else 'Cuenta'}"
-                )
+                if cvu:
+                    # Usar el CVU como nombre de la hoja
+                    nombre_hoja = str(cvu)
+                else:
+                    # Fallback si no hay CVU
+                    nombre_hoja = (
+                        f"MercadoPago {nombre_titular[:15] if nombre_titular else 'Cuenta'}"
+                    )
                 nombre_limpio = limpiar_nombre_hoja(nombre_hoja)
 
                 # Crear el workbook y worksheet manualmente
                 from openpyxl import Workbook
+                from openpyxl.styles import Alignment, PatternFill, Font, Border, Side
+                from openpyxl.formatting.rule import CellIsRule
 
                 wb = Workbook()
                 ws = wb.active
+                
+                # ---------------------------------------------------------
+                # 1. PREPARACIÓN VISUAL GENERAL (Estilo Dashboard)
+                # ---------------------------------------------------------
                 ws.title = nombre_limpio
+                ws.sheet_view.showGridLines = False  # Ocultar líneas de cuadrícula
 
-                # Agregar información del CVU y saldos (sin titular)
-                ws["A1"] = "CVU:"
-                ws["B1"] = cvu if cvu else "No disponible"
+                # Definición de Estilos y Colores
+                # Bordes
+                thin_border = Border(left=Side(style='thin', color="A6A6A6"), 
+                                     right=Side(style='thin', color="A6A6A6"), 
+                                     top=Side(style='thin', color="A6A6A6"), 
+                                     bottom=Side(style='thin', color="A6A6A6"))
+                
+                # Colores Corporativos / Semánticos
+                color_bg_main = "2C3E50" # Azul noche (Título principal)
+                color_txt_main = "FFFFFF"
+                
+                # Débitos (Rojos)
+                fill_head_deb = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
+                fill_col_deb = PatternFill(start_color="F2DCDB", end_color="F2DCDB", fill_type="solid") 
+                fill_row_deb = PatternFill(start_color="FDE9D9", end_color="FDE9D9", fill_type="solid") # Salmón muy suave
 
-                # Agregar saldos con formato numérico
-                ws["A2"] = "Saldo Inicial:"
+                # Créditos (Verdes)
+                fill_head_cred = PatternFill(start_color="00B050", end_color="00B050", fill_type="solid")
+                fill_col_cred = PatternFill(start_color="EBF1DE", end_color="EBF1DE", fill_type="solid")
+                fill_row_cred = PatternFill(start_color="F2F9F1", end_color="F2F9F1", fill_type="solid") # Verde muy suave
+
+                # ---------------------------------------------------------
+                # 2. ENCABEZADO DEL REPORTE
+                # ---------------------------------------------------------
+                ws.merge_cells("A1:G1")
+                titulo_main = ws["A1"]
+                titulo_main.value = f"REPORTE DE MOVIMIENTOS - {nombre_hoja}"
+                titulo_main.font = Font(size=14, bold=True, color=color_txt_main)
+                titulo_main.fill = PatternFill(start_color=color_bg_main, end_color=color_bg_main, fill_type="solid")
+                titulo_main.alignment = Alignment(horizontal="center", vertical="center")
+                ws.row_dimensions[1].height = 25
+
+                # ---------------------------------------------------------
+                # 3. RESUMEN DE SALDOS (Caja estilo tarjeta)
+                # ---------------------------------------------------------
+                # Fila 3 y 4 para saldos
+                ws["A3"] = "SALDO INICIAL"
+                ws["A3"].font = Font(bold=True, size=10, color="666666")
+                
                 if saldo_inicial:
-                    ws["B2"] = convertir_a_numerico(saldo_inicial)
-                    ws["B2"].number_format = "#,##0.00"
+                    ws["B3"] = convertir_a_numerico(saldo_inicial)
+                    ws["B3"].number_format = '"$ "#,##0.00'
+                    ws["B3"].font = Font(bold=True, size=11)
                 else:
-                    ws["B2"] = "No disponible"
+                    ws["B3"] = 0
 
-                ws["A3"] = "Saldo Final:"
+                ws["A4"] = "SALDO FINAL"
+                ws["A4"].font = Font(bold=True, size=10, color="666666")
+
                 if saldo_final:
-                    ws["B3"] = convertir_a_numerico(saldo_final)
-                    ws["B3"].number_format = "#,##0.00"
+                    ws["B4"] = convertir_a_numerico(saldo_final)
+                    ws["B4"].number_format = '"$ "#,##0.00'
+                    ws["B4"].font = Font(bold=True, size=11)
                 else:
-                    ws["B3"] = "No disponible"
+                    ws["B4"] = 0
+                
+                # Borde discreto para los saldos
+                for r in [3, 4]:
+                    ws[f"B{r}"].border = Border(bottom=Side(style='thin', color="DDDDDD"))
 
-                # Tabla de DÉBITOS (columnas A-C, empezar en fila 5)
-                fila_actual = 5
-                ws[f"A{fila_actual}"] = "DÉBITOS"
-                ws[f"A{fila_actual}"].font = ws[f"A{fila_actual}"].font.copy(bold=True)
-                fila_actual += 1
+                # ---------------------------------------------------------
+                # 3.1. INFORMACIÓN ADICIONAL (Titular / Período) - Centro derecha
+                # ---------------------------------------------------------
+                ws["D3"] = "TITULAR"
+                ws["D3"].font = Font(bold=True, size=10, color="666666")
+                ws["D3"].alignment = Alignment(horizontal='right')
+                
+                ws["E3"] = nombre_titular if nombre_titular else "Desconocido"
+                ws["E3"].font = Font(bold=True, size=11)
+                ws["E3"].alignment = Alignment(horizontal='center')
+                ws.merge_cells("E3:G3")
+                
+                ws["D4"] = "PERÍODO"
+                ws["D4"].font = Font(bold=True, size=10, color="666666")
+                ws["D4"].alignment = Alignment(horizontal='right')
 
-                # Headers para débitos
-                ws[f"A{fila_actual}"] = "Fecha"
-                ws[f"B{fila_actual}"] = "Descripción"
-                ws[f"C{fila_actual}"] = "Importe"
+                ws["E4"] = periodo if periodo else "Desconocido"
+                ws["E4"].font = Font(bold=True, size=11)
+                ws["E4"].alignment = Alignment(horizontal='center')
+                ws.merge_cells("E4:G4")
 
-                # Hacer headers en negrita
-                for col in ["A", "B", "C"]:
-                    ws[f"{col}{fila_actual}"].font = ws[
-                        f"{col}{fila_actual}"
-                    ].font.copy(bold=True)
+                # Bordes para info
+                for r in [3, 4]:
+                     for c in ["E", "F", "G"]:
+                        ws[f"{c}{r}"].border = Border(bottom=Side(style='thin', color="DDDDDD"))
 
-                fila_actual += 1
-                inicio_debitos = fila_actual
+                # ---------------------------------------------------------
+                # 3.2. CONTROL DE INTEGRIDAD (Fila 7, Separado -> D6/D7 Centrado)
+                # ---------------------------------------------------------
+                # Lo ponemos vertical en columna D
+                ws["D6"] = "CONTROL DE SALDOS"
+                ws["D6"].font = Font(bold=True, size=10, color="666666")
+                ws["D6"].alignment = Alignment(horizontal='center', vertical='bottom')
 
-                # Agregar datos de débitos
-                for _, row in debitos.iterrows():
-                    ws[f"A{fila_actual}"] = row["Fecha"]
-                    ws[f"B{fila_actual}"] = row["Descripcion"]
-                    ws[f"C{fila_actual}"] = row["Importe"]
-                    ws[f"C{fila_actual}"].number_format = "#,##0.00"
-                    fila_actual += 1
+                # Reservamos D7 para el valor
+                cell_control = ws["D7"]
+                cell_control.font = Font(bold=True, size=12)
+                cell_control.alignment = Alignment(horizontal='center', vertical='center')
+                cell_control.border = Border(bottom=Side(style='thin', color="A6A6A6"), 
+                                             top=Side(style='thin', color="A6A6A6"),
+                                             left=Side(style='thin', color="A6A6A6"),
+                                             right=Side(style='thin', color="A6A6A6"))
 
-                # Agregar total de débitos
-                if not debitos.empty:
-                    ws[f"B{fila_actual}"] = "TOTAL DÉBITOS:"
-                    ws[f"B{fila_actual}"].font = ws[f"B{fila_actual}"].font.copy(
-                        bold=True
-                    )
-                    ws[f"C{fila_actual}"] = debitos["Importe"].sum()
-                    ws[f"C{fila_actual}"].number_format = "#,##0.00"
-                    ws[f"C{fila_actual}"].font = ws[f"C{fila_actual}"].font.copy(
-                        bold=True
-                    )
-                    fila_total_debitos = fila_actual
+                # ---------------------------------------------------------
+                # 4. TABLAS DE DATOS
+                # ---------------------------------------------------------
+                fila_inicio_tablas = 10
+                
+                # HEADERS FIJOS
+                # CRÉDITOS (A-C)
+                f_header = fila_inicio_tablas
+                ws.merge_cells(f"A{f_header}:C{f_header}")
+                ws[f"A{f_header}"] = "CRÉDITOS" 
+                ws[f"A{f_header}"].fill = fill_head_cred
+                ws[f"A{f_header}"].font = Font(bold=True, color="FFFFFF")
+                ws[f"A{f_header}"].alignment = Alignment(horizontal='center')
+                ws[f"A{f_header}"].border = thin_border
+                
+                headers = ["Fecha", "Descripción", "Importe"]
+                cols_cred = ["A", "B", "C"]
+                f_sub = f_header + 1
+                for i, h in enumerate(headers):
+                    c = ws[f"{cols_cred[i]}{f_sub}"]
+                    c.value = h
+                    c.fill = fill_col_cred
+                    c.font = Font(bold=True)
+                    c.alignment = Alignment(horizontal='center')
+                    c.border = thin_border
+                
+                # DÉBITOS (E-G)
+                ws.merge_cells(f"E{f_header}:G{f_header}")
+                ws[f"E{f_header}"] = "DÉBITOS" 
+                ws[f"E{f_header}"].fill = fill_head_deb
+                ws[f"E{f_header}"].font = Font(bold=True, color="FFFFFF")
+                ws[f"E{f_header}"].alignment = Alignment(horizontal='center')
+                ws[f"E{f_header}"].border = thin_border
+                
+                cols_deb = ["E", "F", "G"]
+                for i, h in enumerate(headers):
+                    c = ws[f"{cols_deb[i]}{f_sub}"]
+                    c.value = h
+                    c.fill = fill_col_deb
+                    c.font = Font(bold=True)
+                    c.alignment = Alignment(horizontal='center')
+                    c.border = thin_border
+                    
+                # --- LLENADO DE DATOS (PARALELO) ---
+                fila_dato_start = f_sub + 1
+                
+                # 1. CRÉDITOS
+                f_cred = fila_dato_start
+                if creditos.empty:
+                    ws.merge_cells(f"A{f_cred}:C{f_cred}")
+                    ws[f"A{f_cred}"] = "SIN MOVIMIENTOS"
+                    ws[f"A{f_cred}"].font = Font(italic=True, color="666666")
+                    ws[f"A{f_cred}"].alignment = Alignment(horizontal='center')
+                    ws[f"A{f_cred}"].border = thin_border
+                    f_cred += 1
                 else:
-                    fila_total_debitos = None
+                    start_c = f_cred
+                    for _, r in creditos.iterrows():
+                        ws[f"A{f_cred}"] = r["Fecha"]  # MP dates are strings usually
+                        ws[f"A{f_cred}"].fill = fill_row_cred
+                        ws[f"A{f_cred}"].alignment = Alignment(horizontal='center')
+                        ws[f"A{f_cred}"].border = thin_border
 
-                # Tabla de CRÉDITOS (columnas E-G, empezar en fila 5)
-                fila_creditos = 5
-                ws[f"E{fila_creditos}"] = "CRÉDITOS"
-                ws[f"E{fila_creditos}"].font = ws[f"E{fila_creditos}"].font.copy(
-                    bold=True
-                )
-                fila_creditos += 1
+                        ws[f"B{f_cred}"] = str(r["Descripcion"])
+                        ws[f"B{f_cred}"].fill = fill_row_cred
+                        ws[f"B{f_cred}"].border = thin_border
 
-                # Headers para créditos
-                ws[f"E{fila_creditos}"] = "Fecha"
-                ws[f"F{fila_creditos}"] = "Descripción"
-                ws[f"G{fila_creditos}"] = "Importe"
+                        ws[f"C{f_cred}"] = r["Importe"]
+                        ws[f"C{f_cred}"].number_format = '"$ "#,##0.00'
+                        ws[f"C{f_cred}"].fill = fill_row_cred
+                        ws[f"C{f_cred}"].border = thin_border
+                        f_cred += 1
+                    
+                    # Total Créditos
+                    ws.merge_cells(f"A{f_cred}:B{f_cred}")
+                    ws[f"A{f_cred}"] = "TOTAL CRÉDITOS"
+                    ws[f"A{f_cred}"].font = Font(bold=True)
+                    ws[f"A{f_cred}"].alignment = Alignment(horizontal='right')
+                    ws[f"A{f_cred}"].fill = fill_col_cred
+                    ws[f"A{f_cred}"].border = thin_border
+                    
+                    ws[f"C{f_cred}"] = f"=SUM(C{start_c}:C{f_cred-1})"
+                    ws[f"C{f_cred}"].number_format = '"$ "#,##0.00'
+                    ws[f"C{f_cred}"].font = Font(bold=True)
+                    ws[f"C{f_cred}"].fill = fill_col_cred
+                    ws[f"C{f_cred}"].border = thin_border
+                    f_cred += 1
 
-                # Hacer headers en negrita
-                for col in ["E", "F", "G"]:
-                    ws[f"{col}{fila_creditos}"].font = ws[
-                        f"{col}{fila_creditos}"
-                    ].font.copy(bold=True)
-
-                fila_creditos += 1
-                inicio_creditos = fila_creditos
-
-                # Agregar datos de créditos
-                for _, row in creditos.iterrows():
-                    ws[f"E{fila_creditos}"] = row["Fecha"]
-                    ws[f"F{fila_creditos}"] = row["Descripcion"]
-                    ws[f"G{fila_creditos}"] = row["Importe"]
-                    ws[f"G{fila_creditos}"].number_format = "#,##0.00"
-                    fila_creditos += 1
-
-                # Agregar total de créditos
-                if not creditos.empty:
-                    ws[f"F{fila_creditos}"] = "TOTAL CRÉDITOS:"
-                    ws[f"F{fila_creditos}"].font = ws[f"F{fila_creditos}"].font.copy(
-                        bold=True
-                    )
-                    ws[f"G{fila_creditos}"] = creditos["Importe"].sum()
-                    ws[f"G{fila_creditos}"].number_format = "#,##0.00"
-                    ws[f"G{fila_creditos}"].font = ws[f"G{fila_creditos}"].font.copy(
-                        bold=True
-                    )
-                    fila_total_creditos = fila_creditos
+                # 2. DÉBITOS
+                f_deb = fila_dato_start
+                if debitos.empty:
+                    ws.merge_cells(f"E{f_deb}:G{f_deb}")
+                    ws[f"E{f_deb}"] = "SIN MOVIMIENTOS"
+                    ws[f"E{f_deb}"].font = Font(italic=True, color="666666")
+                    ws[f"E{f_deb}"].alignment = Alignment(horizontal='center')
+                    ws[f"E{f_deb}"].border = thin_border
+                    f_deb += 1
                 else:
-                    fila_total_creditos = None
+                    start_d = f_deb
+                    for _, r in debitos.iterrows():
+                        ws[f"E{f_deb}"] = r["Fecha"]
+                        ws[f"E{f_deb}"].fill = fill_row_deb
+                        ws[f"E{f_deb}"].alignment = Alignment(horizontal='center')
+                        ws[f"E{f_deb}"].border = thin_border
 
-                # Agregar fórmula de control en J7
-                # Fórmula: Saldo Inicial + Total Créditos - Total Débitos - Saldo Final
-                ws["I7"] = "Control:"
-                ws["I7"].font = ws["I7"].font.copy(bold=True)
+                        ws[f"F{f_deb}"] = str(r["Descripcion"])
+                        ws[f"F{f_deb}"].fill = fill_row_deb
+                        ws[f"F{f_deb}"].border = thin_border
 
-                # Construir la fórmula dinámicamente
-                formula_parts = ["B2"]  # Saldo inicial
+                        ws[f"G{f_deb}"] = r["Importe"]
+                        ws[f"G{f_deb}"].number_format = '"$ "#,##0.00'
+                        ws[f"G{f_deb}"].fill = fill_row_deb
+                        ws[f"G{f_deb}"].border = thin_border
+                        f_deb += 1
+                    
+                    # Total Débitos
+                    ws.merge_cells(f"E{f_deb}:F{f_deb}")
+                    ws[f"E{f_deb}"] = "TOTAL DÉBITOS"
+                    ws[f"E{f_deb}"].font = Font(bold=True)
+                    ws[f"E{f_deb}"].alignment = Alignment(horizontal='right')
+                    ws[f"E{f_deb}"].fill = fill_col_deb
+                    ws[f"E{f_deb}"].border = thin_border
+                    
+                    ws[f"G{f_deb}"] = f"=SUM(G{start_d}:G{f_deb-1})"
+                    ws[f"G{f_deb}"].number_format = '"$ "#,##0.00'
+                    ws[f"G{f_deb}"].font = Font(bold=True)
+                    ws[f"G{f_deb}"].fill = fill_col_deb
+                    ws[f"G{f_deb}"].border = thin_border
+                    f_deb += 1
 
-                if fila_total_creditos:
-                    formula_parts.append(f"G{fila_total_creditos}")  # Total créditos
-                else:
-                    formula_parts.append("0")  # Si no hay créditos
+                f_ini = "B3"
+                f_tot_cred = f"C{f_cred-1}" if not creditos.empty else "0"
+                f_tot_deb = f"G{f_deb-1}" if not debitos.empty else "0"
+                f_fin = "B4"
+                
+                # Asignamos a D7
+                ws["D7"] = f"={f_ini}+{f_tot_cred}-{f_tot_deb}-{f_fin}"
+                ws["D7"].number_format = '"$ "#,##0.00'
 
-                if fila_total_debitos:
-                    formula_parts.append(
-                        f"C{fila_total_debitos}"
-                    )  # Total débitos (se resta)
-                else:
-                    formula_parts.append("0")  # Si no hay débitos
-
-                formula_parts.append("B3")  # Saldo final (se resta)
-
-                # Crear la fórmula: =B2+G[fila_creditos]-C[fila_debitos]-B3
-                formula = f"=B2+{formula_parts[1]}-{formula_parts[2]}-B3"
-                ws["J7"] = formula
-                ws["J7"].number_format = "#,##0.00"
-                ws["J7"].font = ws["J7"].font.copy(bold=True)
+                # FORMATO CONDICIONAL: ROJO SI NO ES CERO
+                red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+                red_font = Font(color='9C0006', bold=True)
+                
+                ws.conditional_formatting.add('D7', 
+                    CellIsRule(operator='notEqual', formula=['0'], stopIfTrue=True, fill=red_fill, font=red_font))
 
                 # Ajustar ancho de columnas
-                ws.column_dimensions["A"].width = 12  # Fecha débitos
-                ws.column_dimensions["B"].width = 50  # Descripción débitos
-                ws.column_dimensions["C"].width = 15  # Importe débitos
-                ws.column_dimensions["E"].width = 12  # Fecha créditos
-                ws.column_dimensions["F"].width = 50  # Descripción créditos
-                ws.column_dimensions["G"].width = 15  # Importe créditos
-                ws.column_dimensions["I"].width = 12  # Etiqueta control
-                ws.column_dimensions["J"].width = 15  # Fórmula control
+                ws.column_dimensions["A"].width = 12
+                ws.column_dimensions["B"].width = 45
+                ws.column_dimensions["C"].width = 18
+                ws.column_dimensions["D"].width = 25 
+                ws.column_dimensions["E"].width = 12
+                ws.column_dimensions["F"].width = 45
+                ws.column_dimensions["G"].width = 18
 
                 # Guardar en BytesIO
                 wb.save(output)
