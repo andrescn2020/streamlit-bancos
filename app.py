@@ -15,7 +15,7 @@ from mercadopago import procesar_mercadopago
 bancos = [
     "BBVA Frances",
     "Santander Rio",
-    # "Credicoop",
+    "Credicoop",
     # "HSBC",
     "ICBC",
     "Supervielle",
