@@ -3,6 +3,7 @@ from frances import procesar_bbva_frances
 from santander import procesar_santander_rio
 from galicia import procesar_galicia
 from icbc import procesar_icbc
+from icbc_2 import procesar_icbc_formato_2
 from macro import procesar_macro
 from nacion import procesar_nacion
 from provincia import procesar_provincia
@@ -17,7 +18,8 @@ bancos = [
     "Santander Rio",
     "Credicoop",
     # "HSBC",
-    "ICBC",
+    "ICBC (Formato 1)",
+    "ICBC (Formato 2)",
     "Supervielle",
     "Galicia",
     "Macro",
@@ -35,8 +37,10 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_santander_rio(archivo_pdf)
     elif banco_seleccionado == "Galicia":
         return procesar_galicia(archivo_pdf)
-    elif banco_seleccionado == "ICBC":
+    elif banco_seleccionado == "ICBC (Formato 1)":
         return procesar_icbc(archivo_pdf)
+    elif banco_seleccionado == "ICBC (Formato 2)":
+        return procesar_icbc_formato_2(archivo_pdf)
     elif banco_seleccionado == "Macro":
         return procesar_macro(archivo_pdf)
     elif banco_seleccionado == "Nacion":
