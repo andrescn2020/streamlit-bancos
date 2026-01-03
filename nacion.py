@@ -70,6 +70,10 @@ def procesar_nacion(archivo_pdf):
         saldo_final = 0.0
 
         for i, line in enumerate(movimientos_extraidos):
+            # Limpieza: eliminar caracteres basura al inicio (e.g. "____ 03/01/25")
+            line = line.strip()
+            line = re.sub(r"^[_.]+", "", line).strip()
+
             parts = line.split()
             if "SALDO ANTERIOR" in line:
                 try:
@@ -85,10 +89,14 @@ def procesar_nacion(archivo_pdf):
                     st.warning(f"Error procesando la línea de saldo anterior: {line}")
                 continue
             if "SALDO FINAL" in line:
-                match = re.search(r"(\d{1,3}(?:\.\d{3})*,\d{2})", line)
+                match = re.search(r"(\d{1,3}(?:\.\d{3})*,\d{2}-?)", line)
                 if match:
                     saldo_str = match.group(0)
-                    saldo_final = float(saldo_str.replace(".", "").replace(",", "."))
+                    sign = 1
+                    if saldo_str.endswith("-"):
+                        sign = -1
+                        saldo_str = saldo_str[:-1]
+                    saldo_final = float(saldo_str.replace(".", "").replace(",", ".")) * sign
 
             if "FECHA MOVIMIENTOS" in line:
                 continue

@@ -51,15 +51,21 @@ def procesar_supervielle(archivo_pdf):
                     if re.match(r"^\d{2}/\d{2}/\d{2}", linea):
                         movimientos.append(linea)
 
-                if "NUMERO DE CUENTA" in linea:
-                    # ... (rest of logic)
+                if "NUMERO DE CUENTA" in linea or "Nro.:" in linea:
                     capturar = True
+                    # Intento 1: Formato "NUMERO DE CUENTA 00-00000000/0"
                     match = re.search(r"NUMERO DE CUENTA\s+(\d{2}-\d{8}/\d)", linea)
+                    if not match:
+                        # Intento 2: Formato "Nro.: 00053031-001"
+                        match = re.search(r"Nro.:\s*([\d-]+)", linea)
+                    
                     if match:
                         cuenta = {}
                         numero_cuenta = match.group(1)
-                        cuenta["cuenta"] = numero_cuenta
-                        cuentas.append(cuenta)
+                        # Verificar que no hayamos procesado esta cuenta ya (a veces se repite en header de paginas)
+                        if not any(c['cuenta'] == numero_cuenta for c in cuentas):
+                           cuenta["cuenta"] = numero_cuenta
+                           cuentas.append(cuenta)
                         numero_de_cuenta_temporal = numero_cuenta
 
                 if "Saldo del período anterior" in linea:
@@ -97,32 +103,49 @@ def procesar_supervielle(archivo_pdf):
 
             def procesar_movimientos(movimientos_cuenta, saldo_inicial):
                 movimientos_limpios = []
+                # El saldo inicial viene del header "Saldo del período anterior"
+                saldo_actual_calculado = saldo_inicial 
+
                 for movimiento in movimientos_cuenta:
-                    movimiento_limpio = {}
-                    fecha = movimiento[0:8]
-                    # Indices fijos originales: 9:40 para descripcion, 85: para valor
-                    descripcion = movimiento[9:40].strip()
-                    valor_str = movimiento[85:].strip()
-
-                    if "-" in valor_str:
-                         saldo_actual_val = float(
-                                valor_str.replace(".", "")
-                                .replace(",", ".")
-                                .replace("-", "")
-                            ) * -1
+                    # Formato esperado: "03/02/25  Descripcion....   Importe   Saldo"
+                    # A veces Referencia numerica entra en conflicto?
+                    # Estrategia: Buscar todos los importes con formato X.XXX,XX al final de linea
+                    
+                    # Regex para montos: numeros con puntos y coma decimal
+                    matches = re.findall(r"((?:\d{1,3}(?:\.\d{3})*)?,\d{2})", movimiento)
+                    
+                    if len(matches) >= 1:
+                        # Asumimos que el ULTIMO es el Saldo Resultante
+                        saldo_str = matches[-1]
+                        saldo_linea = float(saldo_str.replace(".", "").replace(",", "."))
+                        
+                        # El ANTEULTIMO podria ser el importe, pero a veces hay columnas vacias
+                        # Mejor calculamos el importe por diferencia de saldos para asegurar signo
+                        # Importe = Saldo_Linea - Saldo_Anterior
+                        
+                        importe_calculado = saldo_linea - saldo_actual_calculado
+                        
+                        # Limpiar descripcion
+                        # Todo lo que esta antes del primer monto encontrado (o fecha)
+                        # La fecha son los primeros 8
+                        fecha = movimiento[:8]
+                        
+                        # Descripcion: Desde char 8 hasta donde empiece el bloque de numeros finales?
+                        # Simplificacion: Quitamos fecha y quitamos los tokens que sean numeros/montos del final
+                        resto = movimiento[9:].strip()
+                        
+                        # Solo guardamos lo calculado
+                        mov_obj = {
+                            "Fecha": fecha,
+                            "Descripcion": resto.split("   ")[0], # Hack: doble/triple espacio suele separar desc de montos
+                            "Importe": importe_calculado
+                        }
+                        
+                        movimientos_limpios.append(mov_obj)
+                        saldo_actual_calculado = saldo_linea
                     else:
-                        saldo_actual_val = float(
-                            valor_str.replace(".", "").replace(",", ".")
-                        )
-
-                    importe_movimiento = saldo_actual_val - saldo_inicial
-
-                    movimiento_limpio["Fecha"] = fecha
-                    movimiento_limpio["Descripcion"] = descripcion
-                    movimiento_limpio["Importe"] = round(importe_movimiento, 2)
-
-                    movimientos_limpios.append(movimiento_limpio)
-                    saldo_inicial = saldo_actual_val
+                        # No encontramos montos, quiza wrappeo de texto? Ignoramos por ahora
+                        continue
 
                 return movimientos_limpios
 

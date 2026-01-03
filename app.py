@@ -9,10 +9,12 @@ from macro import procesar_macro
 from nacion import procesar_nacion
 from provincia import procesar_provincia
 from supervielle import procesar_supervielle
+from hipotecario import procesar_hipotecario
 from hsbc import procesar_hsbc
 from credicoop import procesar_credicoop
 from mercadopago import procesar_mercadopago
 from credicoop_2 import procesar_credicoop_formato_2
+from macro_2 import procesar_macro_formato_2
 
 # Lista de bancos
 bancos = [
@@ -21,12 +23,14 @@ bancos = [
     "Credicoop",
     "Credicoop (Formato 2)",
     # "HSBC",
+    "Hipotecario",
     "ICBC (Formato 1)",
     "ICBC (Formato 2)",
     "ICBC (Formato 3)",
     "Supervielle",
     "Galicia",
     "Macro",
+    "Macro (Formato 2)",
     "Nacion",
     "Provincia",
     "MercadoPago",
@@ -49,12 +53,16 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_icbc_formato_3(archivo_pdf)
     elif banco_seleccionado == "Macro":
         return procesar_macro(archivo_pdf)
+    elif banco_seleccionado == "Macro (Formato 2)":
+        return procesar_macro_formato_2(archivo_pdf)
     elif banco_seleccionado == "Nacion":
         return procesar_nacion(archivo_pdf)
     elif banco_seleccionado == "Provincia":
         return procesar_provincia(archivo_pdf)
     elif banco_seleccionado == "Supervielle":
         return procesar_supervielle(archivo_pdf)
+    elif banco_seleccionado == "Hipotecario":
+        return procesar_hipotecario(archivo_pdf)
     elif banco_seleccionado == "HSBC":
         return procesar_hsbc(archivo_pdf)
     elif banco_seleccionado == "Credicoop":
