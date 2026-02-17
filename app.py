@@ -22,7 +22,7 @@ bancos = [
     "Santander Rio",
     "Credicoop",
     "Credicoop (Formato 2)",
-    # "HSBC",
+    "HSBC",
     "Hipotecario",
     "ICBC (Formato 1)",
     "ICBC (Formato 2)",

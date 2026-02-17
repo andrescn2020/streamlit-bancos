@@ -68,11 +68,16 @@ def procesar_supervielle(archivo_pdf):
                            cuentas.append(cuenta)
                         numero_de_cuenta_temporal = numero_cuenta
 
-                if "Saldo del período anterior" in linea:
-                    match = re.search(r"([\d\.]+,\d{2})$", linea)
+                if "Saldo del per" in linea and "anterior" in linea:
+                     # Modificado para permitir espacios o signo negativo al final.
+                    match = re.search(r"([\d\.]+,\d{2}[\-]?)", linea.strip())
                     if match:
-                        importe_str = match.group(1).replace(".", "").replace(",", ".")
+                        importe_raw = match.group(1)
+                        es_negativo = importe_raw.endswith("-")
+                        importe_str = importe_raw.replace("-", "").replace(".", "").replace(",", ".")
                         importe = float(importe_str)
+                        if es_negativo: importe *= -1
+
                         resultado = next(
                             (d for d in cuentas if d["cuenta"] == numero_de_cuenta_temporal),
                             None,
@@ -90,10 +95,14 @@ def procesar_supervielle(archivo_pdf):
                         movimientos = []
                     capturar = False
 
-                    match = re.search(r"([\d\.]+,\d{2})$", linea)
+                    match = re.search(r"([\d\.]+,\d{2}[\-]?)", linea.strip())
                     if match:
-                        importe_str = match.group(1).replace(".", "").replace(",", ".")
+                        importe_raw = match.group(1)
+                        es_negativo = importe_raw.endswith("-")
+                        importe_str = importe_raw.replace("-", "").replace(".", "").replace(",", ".")
                         importe = float(importe_str)
+                        if es_negativo: importe *= -1
+
                         resultado = next(
                             (d for d in cuentas if d["cuenta"] == numero_de_cuenta_temporal),
                             None,
@@ -105,56 +114,103 @@ def procesar_supervielle(archivo_pdf):
                 movimientos_limpios = []
                 # El saldo inicial viene del header "Saldo del período anterior"
                 saldo_actual_calculado = saldo_inicial 
+                
+                # Regex para montos: numeros con puntos y coma decimal, OPCIONALMENTE signo menos al final
+                # Agregamos ?: al grupo externo para no capturarlo si usamos findall
+                pattern_monto = re.compile(r"((?:\d{1,3}(?:\.\d{3})*)?,\d{2}-?)")
 
                 for movimiento in movimientos_cuenta:
                     # Formato esperado: "03/02/25  Descripcion....   Importe   Saldo"
-                    # A veces Referencia numerica entra en conflicto?
-                    # Estrategia: Buscar todos los importes con formato X.XXX,XX al final de linea
                     
-                    # Regex para montos: numeros con puntos y coma decimal
-                    matches = re.findall(r"((?:\d{1,3}(?:\.\d{3})*)?,\d{2})", movimiento)
+                    matches = pattern_monto.findall(movimiento)
                     
-                    if len(matches) >= 1:
+                    if len(matches) >= 2:
+                        # LOGICA ESTANDAR: Tiene Importe y Saldo (al menos 2 montos)
                         # Asumimos que el ULTIMO es el Saldo Resultante
-                        saldo_str = matches[-1]
-                        saldo_linea = float(saldo_str.replace(".", "").replace(",", "."))
+                        saldo_str_raw = matches[-1]
                         
-                        # El ANTEULTIMO podria ser el importe, pero a veces hay columnas vacias
-                        # Mejor calculamos el importe por diferencia de saldos para asegurar signo
+                        es_negativo_saldo = saldo_str_raw.endswith("-")
+                        saldo_limpio = saldo_str_raw.replace("-", "").replace(".", "").replace(",", ".")
+                        saldo_linea = float(saldo_limpio)
+                        if es_negativo_saldo: saldo_linea *= -1
+                        
+                        # Calculamos el importe por diferencia de saldos
                         # Importe = Saldo_Linea - Saldo_Anterior
-                        
                         importe_calculado = saldo_linea - saldo_actual_calculado
                         
                         # Limpiar descripcion
-                        # Todo lo que esta antes del primer monto encontrado (o fecha)
-                        # La fecha son los primeros 8
                         fecha = movimiento[:8]
-                        
-                        # Descripcion: Desde char 8 hasta donde empiece el bloque de numeros finales?
-                        # Simplificacion: Quitamos fecha y quitamos los tokens que sean numeros/montos del final
                         resto = movimiento[9:].strip()
                         
-                        # Solo guardamos lo calculado
+                        # Intentar limpiar tokens finales (saldos/importes) de la descripcion
+                        # Si la descripcion termina con el saldo encontrado, lo quitamos
+                        if resto.endswith(saldo_str_raw):
+                             resto = resto[:len(resto)-len(saldo_str_raw)].strip()
+                        
                         mov_obj = {
                             "Fecha": fecha,
-                            "Descripcion": resto.split("   ")[0], # Hack: doble/triple espacio suele separar desc de montos
+                            "Descripcion": resto.split("   ")[0], 
                             "Importe": importe_calculado
                         }
                         
                         movimientos_limpios.append(mov_obj)
                         saldo_actual_calculado = saldo_linea
+
+                    elif len(matches) == 1:
+                        # LOGICA ESTRICTA: Solo tiene un monto (Importe), NO tiene saldo.
+                        # Ej: "30/12/25  Impuesto a las Ganancias       0206580294       3.567,97"
+                        # En este caso, NO podemos calcular por diferencia. Usamos el monto directo.
+                        # Y NO actualizamos saldo_actual_calculado porque la cadena de saldos parece saltar estos movimientos.
+
+                        monto_str_raw = matches[0]
+                        es_negativo_monto = monto_str_raw.endswith("-")
+                        monto_limpio = monto_str_raw.replace("-", "").replace(".", "").replace(",", ".")
+                        importe_directo = float(monto_limpio)
+                        if es_negativo_monto: importe_directo *= -1
+                        
+                        fecha = movimiento[:8]
+                        resto = movimiento[9:].strip()
+                        
+                        # Limpiar descripcion del monto al final
+                        if resto.endswith(monto_str_raw):
+                             resto = resto[:len(resto)-len(monto_str_raw)].strip()
+                        
+                        descripcion = resto.split("   ")[0]
+
+                        # HEURISTICA DE SIGNO: Si no vino con signo negativo explicito,
+                        # intentamos deducir si es DEBITO por palabras clave en la descripcion.
+                        # (Si ya es negativo, lo dejamos asi)
+                        if not es_negativo_monto:
+                            # Palabras clave que indican SALIDA de dinero (Debito)
+                            keywords_debito = [
+                                "Impuesto", "IVA", "Comision", "Gasto", "Débito", 
+                                "Retencion", "Percep", "IIBB", "Sellos", "Mantenimiento",
+                                "Cheque Rechazado", "Debito", "DEB", "Credito DEBIN" 
+                            ]
+                            # Agregue mas keywords
+                            if any(kw.lower() in descripcion.lower() for kw in keywords_debito):
+                                importe_directo *= -1
+                        
+                        mov_obj = {
+                            "Fecha": fecha,
+                            "Descripcion": descripcion,
+                            "Importe": importe_directo
+                        }
+                        movimientos_limpios.append(mov_obj)
                     else:
                         # No encontramos montos, quiza wrappeo de texto? Ignoramos por ahora
                         continue
 
                 return movimientos_limpios
 
-            return cuentas, procesar_movimientos, periodo_global, titular_global
+            return cuentas, procesar_movimientos, periodo_global, titular_global, texto
         
         # --- FIN LÓGICA ORIGINAL ---
 
         # Ejecutar extracción
-        cuentas, procesar_movimientos_func, periodo, nombre_titular = procesar_pdf(archivo_pdf.read())
+        cuentas, procesar_movimientos_func, periodo, nombre_titular, texto_raw = procesar_pdf(archivo_pdf.read())
+
+
 
         if not cuentas:
             st.warning("No se encontraron cuentas en el PDF (Formato Original)")
@@ -175,7 +231,70 @@ def procesar_supervielle(archivo_pdf):
             numero_cuenta = cuenta["cuenta"]
             movimientos_raw = cuenta.get("movimientos", [])
 
-            # Nombre hoja limpio
+            # --- CALIBRACION AUTOMATICA CON FILA DE AJUSTE ---
+            # Algunos movimientos (ej: 30/12) están listados pero YA incluidos en el Saldo Inicial (31/12).
+            # Para respetar el "Saldo Inicial" exacto del PDF y a la vez que cierre el control:
+            # Agregamos una fila de "Ajuste" que compense la diferencia.
+            
+            datos = procesar_movimientos_func(movimientos_raw, saldo_inicial)
+            
+            total_movimientos = sum(d["Importe"] for d in datos)
+            saldo_final_teorico = saldo_inicial + total_movimientos
+            diferencia = saldo_final_teorico - saldo_final
+            
+            # Si hay diferencia significativa (> 0.01), agregamos movimiento de ajuste
+            if abs(diferencia) > 0.01:
+                # --- VALIDACION INTELIGENTE ---
+                # Chequeamos si la diferencia coincide EXACTAMENTE con la suma de los primeros movimientos.
+                
+                suma_acumulada = 0.0
+                es_error_conocido = False
+                indices_coincidentes = 0
+                
+                # Probamos sumando los primeros 5 movimientos a ver si alguno calza
+                for i in range(min(5, len(datos))):
+                    suma_acumulada += datos[i]["Importe"]
+                    # Chequeamos si la diferencia es igual a esta suma acumulada (con tolerancia)
+                    if abs(diferencia - suma_acumulada) < 0.01:
+                        es_error_conocido = True
+                        indices_coincidentes = i + 1
+                        break
+                
+                if es_error_conocido:
+                    # CASO 1: Movimientos pre-periodo detectados.
+                    # El usuario pidio NO extraerlos si generan diferencia.
+                    # Los eliminamos de la lista.
+                    
+                    st.warning(f"⚠️ **Ajuste Automático en Cuenta {numero_cuenta}**")
+                    st.info(f"Se detectó que los primeros {indices_coincidentes} movimientos (Suma: ${suma_acumulada:,.2f}) sobran en el cálculo del saldo.")
+                    st.success("✅ **Acción:** Se han eliminado estos movimientos del reporte para que el saldo cuadre perfecto.")
+                    
+                    # Eliminamos los N primeros
+                    datos = datos[indices_coincidentes:]
+                    
+                else:
+                    # CASO 2: Error desconocido.
+                    # Mantenemos la lógica de fila de AJUSTE para alertar que algo esta mal.
+                    st.error(f"❌ **Diferencia de Saldos NO explicada (${diferencia:,.2f}) en Cuenta {numero_cuenta}**")
+                    st.warning("Podría haber un error de extracción (movimiento faltante o mal leido). Revisar el Excel.")
+                    
+                    ajuste_row = {
+                        "Fecha": datos[0]["Fecha"] if datos else "",
+                        "Descripcion": "AJUSTE POR DIFERENCIA DE SALDOS (REVISAR)",
+                        "Importe": -diferencia
+                    }
+                    datos.insert(0, ajuste_row)
+
+            df = pd.DataFrame(datos, columns=["Fecha", "Descripcion", "Importe"])
+
+            # Separar Creditos y Debitos
+            if not df.empty:
+                creditos = df[df["Importe"] > 0].copy()
+                debitos = df[df["Importe"] < 0].copy()
+                debitos["Importe"] = debitos["Importe"].abs()
+            else:
+                creditos = pd.DataFrame(columns=["Fecha", "Descripcion", "Importe"])
+                debitos = pd.DataFrame(columns=["Fecha", "Descripcion", "Importe"])
             nombre_hoja = numero_cuenta.replace("/", "-")[:30]
             ws = wb.create_sheet(title=nombre_hoja)
             
@@ -208,21 +327,9 @@ def procesar_supervielle(archivo_pdf):
             fill_col_cred = PatternFill(start_color="EBF1DE", end_color="EBF1DE", fill_type="solid")
             fill_row_cred = PatternFill(start_color="F2F9F1", end_color="F2F9F1", fill_type="solid")
 
-            # Procesar datos
-            if len(movimientos_raw) > 0:
-                movimientos_raw.pop(0) # Logic original
-
-            datos = procesar_movimientos_func(movimientos_raw, saldo_inicial)
-            df = pd.DataFrame(datos, columns=["Fecha", "Descripcion", "Importe"])
-
-            # Separar
-            if not df.empty:
-                creditos = df[df["Importe"] > 0].copy()
-                debitos = df[df["Importe"] < 0].copy()
-                debitos["Importe"] = debitos["Importe"].abs()
-            else:
-                creditos = pd.DataFrame(columns=["Fecha", "Descripcion", "Importe"])
-                debitos = pd.DataFrame(columns=["Fecha", "Descripcion", "Importe"])
+            # Procesar datos (YA REALIZADO ARRIBA para calibracion)
+            # datos = procesar_movimientos_func(movimientos_raw, saldo_inicial)
+            # df = pd.DataFrame(datos, columns=["Fecha", "Descripcion", "Importe"])
 
             # --- HEADER ---
             ws.merge_cells("A1:G1")
@@ -233,10 +340,10 @@ def procesar_supervielle(archivo_pdf):
             tit.alignment = Alignment(horizontal="center", vertical="center")
             ws.row_dimensions[1].height = 25
 
-            # Saldo Inicial
+            # Saldo Inicial (AJUSTADO)
             ws["A3"] = "SALDO INICIAL"
             ws["A3"].font = Font(bold=True, size=10, color="666666")
-            ws["B3"] = saldo_inicial
+            ws["B3"] = saldo_inicial 
             ws["B3"].number_format = '"$ "#,##0.00'
             ws["B3"].font = Font(bold=True, size=11)
             ws["B3"].border = Border(bottom=Side(style='thin', color="DDDDDD"))

@@ -28,6 +28,8 @@ def procesar_bbva_frances(archivo_pdf):
             for page in pdf.pages:
                 texto_completo += page.extract_text() + "\n"
             
+            # Debug removed
+            
         lineas = texto_completo.splitlines()
 
         # 1. Extracción de Metadata Global (Titular, Período)
@@ -35,22 +37,45 @@ def procesar_bbva_frances(archivo_pdf):
         periodo_global = "Sin Especificar"
         
         # Extracción Titular: Buscar sección 'Intervinientes'
-        for i, l in enumerate(lineas[:100]):
-            if "Intervinientes" in l:
-                # El titular suele estar en la línea siguiente (i+1)
-                if i + 1 < len(lineas):
-                    raw_tit = lineas[i+1].strip()
-                    # Quitar CUIT entre paréntesis si existe: "JUAN PEREZ (20-123...)"
-                    raw_tit = re.sub(r"\(\d{2}-\d{8,}-\d\)", "", raw_tit)
-                    titular_global = raw_tit.strip()
-                break
+        if titular_global == "Sin Especificar":
+             # Fallback: Buscar en las primeras 20 lineas, saltando encabezados conocidos
+             skip_phrases = ["RESUMEN", "PYMES", "CUENTAS", "PAQUETES", "OCASA", "R.N.P.S.P.", "PÁGINA", "SOBRE", "AUTORIZACIÓN", "BANCO", "BBVA", "FRANCES", "DIGITAL"]
+             candidates = []
+             
+             for i, line in enumerate(lineas[:25]):
+                 line_clean = line.strip()
+                 if not line_clean: continue
+                 
+                 # Ignorar basura del PDF
+                 if line_clean.startswith("(cid:"): continue
+                 
+                 # Ignorar lineas puramente numericas, cortas, o con fecha
+                 # Agregar espacios al replace para chequear '1/1 05555 1'
+                 check_digit = line_clean.replace(".", "").replace("/", "").replace("-", "").replace(" ", "")
+                 if len(line_clean) < 3 or check_digit.isdigit(): 
+                     continue
+                 
+                 # Chequear frases a saltar
+                 is_skippable = False
+                 for phrase in skip_phrases:
+                     if phrase in line_clean.upper():
+                         is_skippable = True
+                         break
+                 
+                 if not is_skippable:
+                     # Tomamos el primer candidato "sólido"
+                     candidates.append(line_clean)
+            
+             if candidates:
+                 titular_global = candidates[0]
         
         # Extracción Período (Intento Regex Global)
         match_per = re.search(r"del\s+(\d{2}/\d{2}/\d{4})\s+al\s+(\d{2}/\d{2}/\d{4})", texto_completo, re.IGNORECASE)
         if match_per:
             periodo_global = f"Del {match_per.group(1)} al {match_per.group(2)}"
-        
-        # (Si falla el regex, calcularemos el período basado en las fechas de movimientos más adelante)
+        else:
+             # Fallback Calc Periodo from transactions later
+             periodo_global = "Calcular"
 
         # 2. Lógica de Extracción de Movimientos (Existente)
         inicio = next((i for i, line in enumerate(lineas) if "Movimientos en cuentas" in line), None)
@@ -97,6 +122,80 @@ def procesar_bbva_frances(archivo_pdf):
             st.warning("No se encontraron cuentas en el PDF")
             return None
 
+        # -- CALCULO PERIODO SI FALTA --
+        if periodo_global == "Calcular":
+            # Extraer todas las fechas posibles de los movimientos
+            # Las fechas en la col 1 son DD/MM. Necesitamos inferir AÑO.
+            # Buscamos años en las descripciones de TODO el texto para tener contexto
+            anios_en_texto = re.findall(r"\d{2}/\d{2}/(\d{2,4})", texto_completo)
+            anios_candidatos = []
+            for y in anios_en_texto:
+                if len(y) == 2: y = "20" + y
+                if y.startswith("20") and len(y) == 4:
+                     anios_candidatos.append(int(y))
+            
+            # Usar la moda o min/max de años encontrados
+            current_year = 2024 # Default
+            if anios_candidatos:
+                from collections import Counter
+                current_year = Counter(anios_candidatos).most_common(1)[0][0]
+            
+            fechas_found = []
+            pattern_fecha_mov = r"(\d{2}/\d{2})"
+            
+            for cuenta in cuentas_unicas:
+                 raw_lines = movimientos_extraidos[cuenta["inicio"] + 1 : cuenta["fin"]]
+                 for linea in raw_lines:
+                     match = re.search(pattern_fecha_mov, linea)
+                     if match:
+                         dia_mes = match.group(1)
+                         # Intentar asignar año. Si es Dic (12) y el año detectado es YYYY, ok.
+                         # Si cruza de dic a ene, hay cambio de año.
+                         # Simplificacion: Usar el año detectado mas frecuente para empezar, ajustar si meses saltan
+                         try:
+                             d, m = map(int, dia_mes.split("/"))
+                             # Si tenemos fechas con año explicito en descripcion en esa linea, usar ese año
+                             # Pero es costoso parsear linea por linea ahora.
+                             # Asumimos año principal.
+                             # Si m > mes actual real y estamos a fin de año... complejo sin contexto.
+                             # Usamos anios_candidatos min y max si existen
+                             year_to_use = current_year
+                             if anios_candidatos:
+                                 # Si mes es 12 y existe año X, y mes 01 y existe año X+1
+                                 pass
+                             
+                             # Vamos a construir objetos date arbitrarios con el año detectado
+                             # Luego si hay salto grande de meses corregimos
+                             import datetime
+                             fecha_obj = datetime.date(year_to_use, m, d)
+                             fechas_found.append(fecha_obj)
+                         except: pass
+            
+            if fechas_found:
+                fechas_found.sort()
+                # Corregir salto de año (ej: 30/12/2025 -> 02/01/2026)
+                # Si hay meses 12 y meses 1, ajustar el año de los meses 1 a year+1 (o 12 a year-1)
+                meses = [f.month for f in fechas_found]
+                if 12 in meses and 1 in meses:
+                    # Asumir que el año detectado 'current_year' es el del final del periodo o inicio?
+                    # Si anios_candidatos tiene 2025 y 2026, usar logica
+                    unique_years = sorted(list(set(anios_candidatos)))
+                    if len(unique_years) >= 2:
+                        y_start, y_end = unique_years[0], unique_years[-1]
+                        # Reasignar años
+                        fechas_fixed = []
+                        for f in fechas_found:
+                            y = y_start if f.month > 6 else y_end
+                            fechas_fixed.append(datetime.date(y, f.month, f.day))
+                        fechas_found = fechas_fixed
+                        fechas_found.sort()
+                
+                min_f = fechas_found[0].strftime("%d/%m/%Y")
+                max_f = fechas_found[-1].strftime("%d/%m/%Y")
+                periodo_global = f"Del {min_f} al {max_f}"
+            else:
+                periodo_global = "Sin Especificar"
+
         # --- GENERACIÓN EXCEL (ESTILO DASHBOARD) ---
         output = io.BytesIO()
         wb = Workbook()
@@ -128,7 +227,7 @@ def procesar_bbva_frances(archivo_pdf):
             ws.sheet_view.showGridLines = False
             
             # Extraer Movimientos de esta cuenta
-            pattern = r"(\d{2}/\d{2})\s([A-Za-z0-9\s\./,\-+]+)\s([-]?\d{1,3}(?:[\.,]\d{3})*(?:[\.,]\d{2}))\s"
+            pattern = r"(\d{2}/\d{2})\s([A-Za-z0-9\s\./,\-+\$\(\)]+)\s([-]?\d{1,3}(?:[\.,]\d{3})*(?:[\.,]\d{2}))\s"
             resultados = []
             
             raw_lines = movimientos_extraidos[cuenta_info["inicio"] + 1 : cuenta_info["fin"]]
