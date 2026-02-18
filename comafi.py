@@ -141,21 +141,10 @@ def procesar_comafi(archivo_pdf):
         all_text = ""
         raw_bytes = archivo_pdf.read()
         with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
-            with st.expander("📄 Ver texto extraído del PDF", expanded=False):
-                for pg_idx, page in enumerate(pdf.pages):
-                    text = page.extract_text()
-                    tablas = page.extract_tables()
-                    st.markdown(f"---\n### Página {pg_idx + 1}")
-                    if text:
-                        st.code(text, language="text")
-                    else:
-                        st.warning(f"Página {pg_idx + 1}: sin texto.")
-                    if tablas:
-                        for t_idx, tabla in enumerate(tablas):
-                            st.markdown(f"**Tabla {t_idx + 1}:**")
-                            st.table(tabla)
-                    if text:
-                        all_text += text + "\n"
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    all_text += text + "\n"
 
         lines = all_text.splitlines()
 
