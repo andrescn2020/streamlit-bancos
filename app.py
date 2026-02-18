@@ -16,10 +16,12 @@ from mercadopago import procesar_mercadopago
 from credicoop_2 import procesar_credicoop_formato_2
 from macro_2 import procesar_macro_formato_2
 from galicia_mas import procesar_galicia_mas
+from comafi import procesar_comafi
 
 # Lista de bancos (orden alfabético)
 bancos = [
     "BBVA Frances",
+    "Comafi",
     "Credicoop",
     "Credicoop (Formato 2)",
     "Galicia",
@@ -75,6 +77,8 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_credicoop_formato_2(archivo_pdf)
     elif banco_seleccionado == "MercadoPago":
         return procesar_mercadopago(archivo_pdf)
+    elif banco_seleccionado == "Comafi":
+        return procesar_comafi(archivo_pdf)
     else:
         st.info(f"Lógica para {banco_seleccionado} aún no implementada")
         return None
