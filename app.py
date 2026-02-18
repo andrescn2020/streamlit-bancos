@@ -15,25 +15,27 @@ from credicoop import procesar_credicoop
 from mercadopago import procesar_mercadopago
 from credicoop_2 import procesar_credicoop_formato_2
 from macro_2 import procesar_macro_formato_2
+from galicia_mas import procesar_galicia_mas
 
-# Lista de bancos
+# Lista de bancos (orden alfabético)
 bancos = [
     "BBVA Frances",
-    "Santander Rio",
     "Credicoop",
     "Credicoop (Formato 2)",
-    "HSBC",
+    "Galicia",
+    "Galicia Más",
     "Hipotecario",
+    "HSBC",
     "ICBC (Formato 1)",
     "ICBC (Formato 2)",
     "ICBC (Formato 3)",
-    "Supervielle",
-    "Galicia",
     "Macro",
     "Macro (Formato 2)",
+    "MercadoPago",
     "Nacion",
     "Provincia",
-    "MercadoPago",
+    "Santander Rio",
+    "Supervielle",
 ]
 
 
@@ -45,6 +47,8 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_santander_rio(archivo_pdf)
     elif banco_seleccionado == "Galicia":
         return procesar_galicia(archivo_pdf)
+    elif banco_seleccionado == "Galicia Más":
+        return procesar_galicia_mas(archivo_pdf)
     elif banco_seleccionado == "ICBC (Formato 1)":
         return procesar_icbc(archivo_pdf)
     elif banco_seleccionado == "ICBC (Formato 2)":
