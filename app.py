@@ -18,6 +18,8 @@ from macro_2 import procesar_macro_formato_2
 from galicia_mas import procesar_galicia_mas
 from comafi import procesar_comafi
 
+st.set_page_config(page_title="Movimientos Bancos", page_icon="🏦")
+
 # Lista de bancos (orden alfabético)
 bancos = [
     "BBVA Frances",
@@ -41,7 +43,7 @@ bancos = [
 ]
 
 
-def procesar_banco(banco_seleccionado, archivo_pdf):
+def procesar_banco(banco_seleccionado, archivo_pdf, debug=False):
     """Función principal que dirige el procesamiento según el banco seleccionado"""
     if banco_seleccionado == "BBVA Frances":
         return procesar_bbva_frances(archivo_pdf)
@@ -50,7 +52,7 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
     elif banco_seleccionado == "Galicia":
         return procesar_galicia(archivo_pdf)
     elif banco_seleccionado == "Galicia Más":
-        return procesar_galicia_mas(archivo_pdf)
+        return procesar_galicia_mas(archivo_pdf, debug=debug)
     elif banco_seleccionado == "ICBC (Formato 1)":
         return procesar_icbc(archivo_pdf)
     elif banco_seleccionado == "ICBC (Formato 2)":
@@ -90,6 +92,11 @@ st.title("Selector de Banco y Subida de PDF")
 # Selector de banco
 banco_seleccionado = st.selectbox("Selecciona un banco:", bancos)
 
+# Checkbox de debug para bancos que lo soportan
+debug_mode = False
+if banco_seleccionado == "Galicia Más":
+    debug_mode = st.checkbox("🔍 Modo Debug (mostrar detalle de parseo)", value=False)
+
 # Subida de archivo PDF
 archivo_pdf = st.file_uploader("Sube un archivo PDF", type=["pdf"])
 
@@ -97,7 +104,7 @@ if archivo_pdf is not None:
     st.success(f"Archivo '{archivo_pdf.name}' subido correctamente.")
 
     # Procesar el archivo según el banco seleccionado
-    resultado = procesar_banco(banco_seleccionado, archivo_pdf)
+    resultado = procesar_banco(banco_seleccionado, archivo_pdf, debug=debug_mode)
 
     if resultado is not None:
         # Determinar el nombre del archivo según el banco

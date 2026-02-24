@@ -12,7 +12,7 @@ def clean_for_excel(text):
     if not text: return ""
     return re.sub(r'[\000-\010]|[\013-\014]|[\016-\037]', '', str(text)).strip()
 
-def procesar_galicia_mas(archivo_pdf):
+def procesar_galicia_mas(archivo_pdf, debug=False):
     """
     Procesador Galicia Más V1.0 - Motor Layout + Regex
     -------------------------------------------------------
@@ -45,6 +45,10 @@ def procesar_galicia_mas(archivo_pdf):
         # Montos: soporta 100,000.00 | 583.05 | .03 (centavos)
         # Word boundaries para no matchear parciales como 25.41 de 25.413
         re_monto = re.compile(r"(?<!\d)(\d{1,3}(?:,\d{3})*\.\d{2}|\.\d{2})(?!\d)")
+        
+        debug_lines_raw = []      # texto crudo por pagina
+        debug_movs = []            # movimientos parseados
+        debug_discarded = []       # lineas descartadas por filtro basura
         
         with pdfplumber.open(io.BytesIO(archivo_pdf.read())) as pdf:
             # ============================================================
@@ -148,9 +152,12 @@ def procesar_galicia_mas(archivo_pdf):
                 "EL MONTO DEL IVA"
             ]
             
-            for page in pdf.pages:
+            for page_idx, page in enumerate(pdf.pages):
                 text = page.extract_text(layout=True)
                 if not text: continue
+                
+                if debug:
+                    debug_lines_raw.append((page_idx + 1, text))
                 
                 for line in text.splitlines():
                     line_clean = line.strip()
@@ -191,6 +198,14 @@ def procesar_galicia_mas(archivo_pdf):
                             except:
                                 continue
                             
+                            # Detectar saldo negativo con guion al final (ej: 11,254.73-)
+                            last_monto_str = montos[-1]
+                            pos_last = desc_part.rfind(last_monto_str)
+                            if pos_last != -1:
+                                after_saldo = desc_part[pos_last + len(last_monto_str):].strip()
+                                if after_saldo.startswith("-"):
+                                    saldo = -saldo
+                            
                             if current_account not in cuentas_data:
                                 cuentas_data[current_account] = []
                             
@@ -208,7 +223,7 @@ def procesar_galicia_mas(archivo_pdf):
                             elif diff_cred < diff_deb and diff_cred < 1.0:
                                 es_credito = True
                             else:
-                                es_credito = any(kw in desc_part.upper() for kw in ["DEP.", "CRED", "CREDI"])
+                                es_credito = any(kw in desc_part.upper() for kw in ["DEP.", "DEPOSITO", "CRED", "CREDI"])
                             
                             desc_clean = desc_part
                             for m in reversed(montos):
@@ -217,13 +232,31 @@ def procesar_galicia_mas(archivo_pdf):
                                     desc_clean = desc_clean[:idx]
                             desc_clean = desc_clean.strip("- ").strip()
                             
-                            cuentas_data[current_account].append({
+                            mov_entry = {
                                 "Fecha": full_date,
                                 "Descripcion": desc_clean,
                                 "Debito": importe if not es_credito else 0.0,
                                 "Credito": importe if es_credito else 0.0,
                                 "Saldo": saldo
-                            })
+                            }
+                            cuentas_data[current_account].append(mov_entry)
+                            
+                            if debug:
+                                saldo_calc = saldo_prev + (importe if es_credito else -importe)
+                                diff_ctrl = round(saldo_calc - saldo, 2)
+                                debug_movs.append({
+                                    "Cuenta": current_account,
+                                    "Pag": page_idx + 1,
+                                    "Fecha": full_date,
+                                    "Desc": desc_clean[:50],
+                                    "Tipo": "CRED" if es_credito else "DEB",
+                                    "Importe": importe,
+                                    "Saldo PDF": saldo,
+                                    "Saldo Calc": round(saldo_calc, 2),
+                                    "Diff": diff_ctrl,
+                                    "Montos raw": montos,
+                                    "Linea": line_clean[:80]
+                                })
                     else:
                         # --- 3. DESPUES: Linea de continuacion con filtro basura ---
                         if current_account and cuentas_data.get(current_account):
@@ -235,6 +268,65 @@ def procesar_galicia_mas(archivo_pdf):
                             
                             if not is_junk and not is_balance:
                                 cuentas_data[current_account][-1]["Descripcion"] += " " + line_clean
+                            elif debug and is_junk:
+                                debug_discarded.append({
+                                    "Cuenta": current_account,
+                                    "Pag": page_idx + 1,
+                                    "Linea": line_clean[:100]
+                                })
+        
+        # ============================================================
+        # DEBUG OUTPUT - todo en un solo bloque copiable
+        # ============================================================
+        if debug:
+            debug_output = []
+            debug_output.append("=" * 60)
+            debug_output.append("GALICIA MAS - DEBUG COMPLETO")
+            debug_output.append("=" * 60)
+            
+            # Control por cuenta
+            debug_output.append("\n--- CONTROL POR CUENTA ---")
+            for cta in info_cuentas:
+                movs = cuentas_data.get(cta, [])
+                s_ini = saldos_iniciales.get(cta, 0.0)
+                s_fin = saldos_finales.get(cta, 0.0)
+                total_cred = sum(m["Credito"] for m in movs)
+                total_deb = sum(m["Debito"] for m in movs)
+                control = round(s_ini + total_cred - total_deb - s_fin, 2)
+                marca = "OK" if control == 0 else f"DIFF={control}"
+                debug_output.append(f"[{marca}] {info_cuentas[cta]} ({cta}): SI={s_ini:,.2f} + CRED={total_cred:,.2f} - DEB={total_deb:,.2f} = {round(s_ini + total_cred - total_deb, 2):,.2f} vs SF={s_fin:,.2f}")
+            
+            # Movimientos parseados
+            debug_output.append("\n--- MOVIMIENTOS PARSEADOS ---")
+            if debug_movs:
+                debug_output.append(f"Total: {len(debug_movs)}")
+                for i, m in enumerate(debug_movs, 1):
+                    flag = " *** DIFF ***" if m["Diff"] != 0 else ""
+                    debug_output.append(
+                        f"{i:3d}| Cta={m['Cuenta']} Pag={m['Pag']} {m['Fecha']} "
+                        f"{m['Tipo']} {m['Importe']:>12,.2f} "
+                        f"SaldoPDF={m['Saldo PDF']:>12,.2f} SaldoCalc={m['Saldo Calc']:>12,.2f} "
+                        f"Diff={m['Diff']:>8,.2f}{flag} | {m['Desc']}"
+                    )
+            else:
+                debug_output.append("Sin movimientos.")
+            
+            # Lineas descartadas
+            debug_output.append(f"\n--- LINEAS DESCARTADAS ({len(debug_discarded)}) ---")
+            for d in debug_discarded:
+                debug_output.append(f"  Cta={d['Cuenta']} Pag={d['Pag']} | {d['Linea']}")
+            
+            # Texto crudo
+            debug_output.append("\n--- TEXTO CRUDO PDF ---")
+            for pg_num, pg_text in debug_lines_raw:
+                debug_output.append(f"\n>> PAGINA {pg_num} <<")
+                debug_output.append(pg_text)
+            
+            debug_output.append("\n" + "=" * 60)
+            
+            st.markdown("---")
+            st.subheader("🔍 DEBUG OUTPUT (copiá todo)")
+            st.code("\n".join(debug_output), language=None)
         
         # ============================================================
         # FASE 3: GENERAR EXCEL
