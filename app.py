@@ -95,6 +95,11 @@ banco_seleccionado = st.selectbox("Selecciona un banco:", bancos)
 # Subida de archivo PDF
 archivo_pdf = st.file_uploader("Sube un archivo PDF", type=["pdf"])
 
+# Debug checkbox (solo para bancos que lo soportan)
+debug_mode = False
+# if banco_seleccionado in ["..."]:
+#     debug_mode = st.checkbox("🔍 Modo Debug (ver texto del PDF)", value=False)
+
 if archivo_pdf is not None:
     st.success(f"Archivo '{archivo_pdf.name}' subido correctamente.")
 

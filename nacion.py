@@ -34,7 +34,8 @@ def procesar_nacion(archivo_pdf):
                 texto_completo += page.extract_text() + "\n"
             
             lineas = texto_completo.splitlines()
-        
+
+
         # 1. Metadatos (Titular, Periodo)
         titular_global = "Sin Especificar"
         periodo_global = "Sin Especificar"
@@ -122,6 +123,9 @@ def procesar_nacion(archivo_pdf):
                 # Helper for sign handling
                 def parse_amount(s):
                     sign = 1
+                    # Sufijo "A" = Anulación (Banco Nación)
+                    if s.upper().endswith("A"):
+                        s = s[:-1]
                     if s.endswith("-"):
                         sign = -1
                         s = s[:-1]
@@ -169,6 +173,7 @@ def procesar_nacion(archivo_pdf):
                 "Descripcion": clean_for_excel(description),
                 "Importe": amount
             })
+
             previous_balance = balance
 
         if not transactions:

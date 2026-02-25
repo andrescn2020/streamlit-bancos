@@ -71,7 +71,7 @@ def procesar_galicia(archivo_pdf):
 
         for l in lineas:
             if "Saldos" in l:
-                patron = r"([+-]?\$\s*\d{1,3}(?:\.\d{3})*,\d{2})"
+                patron = r"([+-]?\$\s*\d{1,3}(?:\.\d{3})*,\d{2}-?)"
                 valores = re.findall(patron, l)
                 if len(valores) >= 2:
                     # Según análisis: $0,00(Final)$0,05(Inicial)Saldos

@@ -115,7 +115,10 @@ def procesar_credicoop(archivo_pdf):
                "TOTAL IMPUESTO" in l_upper or \
                "PERCIBIDO" in l_upper or \
                "CRE FISC" in l_upper or \
-               "INFORMACION ADICIONAL" in l_upper:
+               "INFORMACION ADICIONAL" in l_upper or \
+               "DETALLE DE TRANSFERENCIAS" in l_upper or \
+               "VIENE DE PAGINA" in l_upper or \
+               "DENOMINACION" in l_upper:
                 
                 # Intentar extraer saldo si es la línea de saldo
                 if "SALDO" in l_upper and "PERCIBIDO" not in l_upper:
@@ -199,35 +202,10 @@ def procesar_credicoop(archivo_pdf):
                         "Importe": importe
                     })
 
+
             i += 1
         
-        # DEDUPLICACIÓN (Fusión de líneas repetidas con mismo importe y fecha)
-        movimientos_limpios = []
-        if movimientos:
-            prev = movimientos[0]
-            movimientos_limpios.append(prev)
-            for curr in movimientos[1:]:
-                # Si es misma fecha y mismo importe absoluto
-                # PERO solo fusionamos si tienen SIGNOS DISTINTOS (Conflicto Débito vs Crédito)
-                # Esto evita borrar dos movimientos reales idénticos (ej: dos pagos iguales)
-                if curr["Fecha"] == prev["Fecha"] and \
-                   abs(abs(curr["Importe"]) - abs(prev["Importe"])) < 0.01 and \
-                   (curr["Importe"] * prev["Importe"] < 0):
-                    
-                    # FUSIONAR (Caso de error visual de PDF)
-                    
-                    # 1. Resolver Conflicto: Gana el positivo (Crédito)
-                    nuevo_importe = abs(curr["Importe"]) 
-                    prev["Importe"] = nuevo_importe
-                    
-                    # 2. Fusionar descripción
-                    prev["Descripcion"] += " " + curr["Descripcion"]
-                else:
-                    movimientos_limpios.append(curr)
-                    prev = curr
-        
-        movimientos = movimientos_limpios
-            
+
         if saldo_final is None and ultimo_saldo_acumulado:
              saldo_final = ultimo_saldo_acumulado
             
