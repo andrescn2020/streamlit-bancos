@@ -104,32 +104,61 @@ def procesar_credicoop(archivo_pdf):
 
             # 3. Saldo Anterior
             if "SALDO ANTERIOR" in linea:
-                match_saldo = re.findall(r"([\d\.,]+)", linea)
+                match_saldo = re.findall(r"([−\-]?[\d\.,]+)", linea)
                 if match_saldo:
                     saldo_inicial = match_saldo[-1]
 
             # DETECCIÓN DE FIN DE MOVIMIENTOS (Saldo final o inicio de tablas resumen)
             l_upper = linea.upper()
-            # Simplificamos las condiciones para ser más agresivos con el footer
-            if (re.search(r"SALDO\s+AL", l_upper) and "IMPUESTO" not in l_upper) or \
-               "TOTAL IMPUESTO" in l_upper or \
-               "PERCIBIDO" in l_upper or \
-               "CRE FISC" in l_upper or \
-               "INFORMACION ADICIONAL" in l_upper or \
-               "DETALLE DE TRANSFERENCIAS" in l_upper or \
-               "VIENE DE PAGINA" in l_upper or \
-               "DENOMINACION" in l_upper:
+            
+            # VIENE DE PAGINA = continuación, NO es fin. Saltar header repetido.
+            if "VIENE DE PAGINA" in l_upper:
+
+                # Saltar las líneas de header repetido que siguen al cambio de página
+                i += 1
+                while i < len(lineas):
+                    l_skip = lineas[i].strip().upper()
+                    # Saltar líneas vacías, headers repetidos (Modulo, Resumen, Debito directo, FECHA COMBTE)
+                    if not l_skip or \
+                       "MODULO" in l_skip or \
+                       "RESUMEN:" in l_skip or \
+                       "DEBITO DIRECTO" in l_skip or \
+                       l_skip.startswith("FECHA") or \
+                       "PAGINA" in l_skip:
+                        i += 1
+                    else:
+                        break
+                continue  # Volver al loop principal con i ya avanzado
+            
+            # Condiciones de BREAK real (fin de movimientos)
+            break_reason = None
+            if re.search(r"SALDO\s+AL", l_upper) and "IMPUESTO" not in l_upper:
+                break_reason = "SALDO AL"
+            elif "TOTAL IMPUESTO" in l_upper:
+                break_reason = "TOTAL IMPUESTO"
+            elif "PERCIBIDO" in l_upper:
+                break_reason = "PERCIBIDO"
+            elif "CRE FISC" in l_upper:
+                break_reason = "CRE FISC"
+            elif "INFORMACION ADICIONAL" in l_upper:
+                break_reason = "INFORMACION ADICIONAL"
+            elif "DETALLE DE TRANSFERENCIAS" in l_upper:
+                break_reason = "DETALLE DE TRANSFERENCIAS"
+            elif "DENOMINACION" in l_upper:
+                break_reason = "DENOMINACION"
+            
+            if break_reason:
+
                 
                 # Intentar extraer saldo si es la línea de saldo
                 if "SALDO" in l_upper and "PERCIBIDO" not in l_upper:
-                    match_saldo_final = re.findall(r"([\d\.,]+)", linea)
+                    match_saldo_final = re.findall(r"([−\-]?[\d\.,]+)", linea)
                     if match_saldo_final:
                         posibles = [x for x in match_saldo_final if ',' in x]
                         if posibles:
                             saldo_final = posibles[-1]
                 
-                # print(f"DEBUG BREAK: Cortando por footer en '{linea.strip()}'")
-                break # TERMINAR DEFINTIVAMENTE
+                break # TERMINAR DEFINITIVAMENTE
 
             # 4. Movimientos
             match_mov = regex_mov.match(linea) # Usar linea original para regex que maneja espacios
@@ -196,15 +225,18 @@ def procesar_credicoop(archivo_pdf):
                     # Limpieza FINAL de descripción (por si se pegó SALDO AL de la línea siguiente)
                     descripcion = re.sub(r"\s*SALDO\s+AL.*", "", descripcion, flags=re.IGNORECASE).strip()
                     
-                    movimientos.append({
+                    mov = {
                         "Fecha": fecha,
                         "Descripcion": descripcion,
                         "Importe": importe
-                    })
+                    }
+                    movimientos.append(mov)
+
 
 
             i += 1
         
+
 
         if saldo_final is None and ultimo_saldo_acumulado:
              saldo_final = ultimo_saldo_acumulado

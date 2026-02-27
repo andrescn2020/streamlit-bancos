@@ -44,6 +44,7 @@ def procesar_macro(archivo_pdf):
         reader = PyPDF2.PdfReader(io.BytesIO(archivo_pdf.read()))
         texto_completo = "".join(page.extract_text() + "\n" for page in reader.pages)
         lineas_raw = texto_completo.splitlines()
+
         
         # 1. Metadatos (Titular, Periodo)
         titular_global = "Sin Especificar"
@@ -72,6 +73,7 @@ def procesar_macro(archivo_pdf):
         # Cortar donde diga "Transferencias entre Cuentas"
         for i, linea in enumerate(texto):
             if "Transferencias entre Cuentas" in linea:
+
                 texto = texto[:i]
                 break
         
@@ -118,8 +120,10 @@ def procesar_macro(archivo_pdf):
                              "Descripcion": clean_for_excel(descripcion), 
                              "Importe": importe
                          })
+
             except ValueError:
                 st.warning(f"Línea con formato inesperado: {linea}")
+
 
         if not resultado:
             st.warning("No se encontraron movimientos en el PDF")

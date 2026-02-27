@@ -15,6 +15,7 @@ from credicoop import procesar_credicoop
 from mercadopago import procesar_mercadopago
 from credicoop_2 import procesar_credicoop_formato_2
 from macro_2 import procesar_macro_formato_2
+from macro_3 import procesar_macro_formato_3
 from galicia_mas import procesar_galicia_mas
 from comafi import procesar_comafi
 
@@ -35,6 +36,7 @@ bancos = [
     "ICBC (Formato 3)",
     "Macro",
     "Macro (Formato 2)",
+    "Macro (Formato 3)",
     "MercadoPago",
     "Nacion",
     "Provincia",
@@ -63,6 +65,8 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_macro(archivo_pdf)
     elif banco_seleccionado == "Macro (Formato 2)":
         return procesar_macro_formato_2(archivo_pdf)
+    elif banco_seleccionado == "Macro (Formato 3)":
+        return procesar_macro_formato_3(archivo_pdf)
     elif banco_seleccionado == "Nacion":
         return procesar_nacion(archivo_pdf)
     elif banco_seleccionado == "Provincia":
