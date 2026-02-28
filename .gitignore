@@ -1,0 +1,27 @@
+# Entorno virtual (La carpeta que acabamos de crear)
+venv/
+ENV/
+env/
+
+# Archivos de Python (compilados)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Datos sensibles y carpetas de sistema
+.env
+.vscode/
+.DS_Store
+
+# Archivos de datos (Excel/PDF que estés procesando)
+# Es mejor no subirlos para proteger la privacidad
+*.xlsx
+*.xls
+*.pdf
+*.csv
+
+# Ignorar todos los archivos .txt por privacidad
+*.txt
+
+# PERO NO ignorar el archivo de requerimientos
+!requirements.txt

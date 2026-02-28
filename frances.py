@@ -79,10 +79,23 @@ def procesar_bbva_frances(archivo_pdf):
 
         # 2. Lógica de Extracción de Movimientos (Existente)
         inicio = next((i for i, line in enumerate(lineas) if "Movimientos en cuentas" in line), None)
+        
+        if inicio is None:
+            # Fallback para el formato nuevo (ej. buscando el encabezado de las columnas)
+            for i, line in enumerate(lineas):
+                if "FECHA ORIGEN CONCEPTO DÉBITO CRÉDITO SALDO" in line:
+                    # El encabezado de la cuenta (CA $ ...) suele estar poco antes, buscamos hacia arriba
+                    for j in range(i - 1, max(-1, i - 10), -1):
+                        if re.match(r"^(CA|CC)\s", lineas[j]):
+                            inicio = j - 1
+                            break
+                    if inicio is not None:
+                        break
+
         fin = next((i for i, line in enumerate(lineas) if "Transferencias" in line), None)
 
         if inicio is None:
-             st.error("No se encontró la sección 'Movimientos en cuentas'")
+             st.error("No se encontró la sección 'Movimientos en cuentas' o encabezados de detalle")
              return None
         
         # Si no encuentra "Transferencias", usar el final del archivo
@@ -115,8 +128,12 @@ def procesar_bbva_frances(archivo_pdf):
                     # Si llega al final sin encontrar cierre explícito
                     cuentas.append(cuenta)
 
-        # Deduplicar cuentas por índice de inicio (por si la lógica anterior falló)
-        cuentas_unicas = {c['inicio']: c for c in cuentas}.values()
+        # Deduplicar cuentas por nombre de la cuenta, conservando el primer bloque (detalle completo)
+        cuentas_dict = {}
+        for c in cuentas:
+            if c['cuenta'] not in cuentas_dict:
+                cuentas_dict[c['cuenta']] = c
+        cuentas_unicas = list(cuentas_dict.values())
 
         if not cuentas_unicas:
             st.warning("No se encontraron cuentas en el PDF")
@@ -227,7 +244,7 @@ def procesar_bbva_frances(archivo_pdf):
             ws.sheet_view.showGridLines = False
             
             # Extraer Movimientos de esta cuenta
-            pattern = r"(\d{2}/\d{2})\s([A-Za-z0-9\s\./,\-+\$\(\)]+)\s([-]?\d{1,3}(?:[\.,]\d{3})*(?:[\.,]\d{2}))\s"
+            pattern = r"^(\d{2}/\d{2})\s+(.*?)\s+([-]?\d{1,3}(?:[\.,]\d{3})*(?:[\.,]\d{2})|[-]?0[\.,]\d{2})(?:\s+[-]?\d{1,3}(?:[\.,]\d{3})*(?:[\.,]\d{2})|\s*[-]?0[\.,]\d{2})?\s*$"
             resultados = []
             
             raw_lines = movimientos_extraidos[cuenta_info["inicio"] + 1 : cuenta_info["fin"]]
@@ -256,7 +273,7 @@ def procesar_bbva_frances(archivo_pdf):
                         linea = linea[:inicio_mov] + linea[fin_mov:]
                      except: pass
 
-                match = re.match(pattern, linea)
+                match = re.search(pattern, linea.strip())
                 if match:
                     fecha = match.group(1)
                     descripcion = match.group(2).strip()
