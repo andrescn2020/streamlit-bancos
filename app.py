@@ -8,6 +8,7 @@ from icbc_formato_3 import procesar_icbc_formato_3
 from macro import procesar_macro
 from nacion import procesar_nacion
 from provincia import procesar_provincia
+from provincia_2 import procesar_provincia_formato_2
 from supervielle import procesar_supervielle
 from hipotecario import procesar_hipotecario
 from hsbc import procesar_hsbc
@@ -40,6 +41,7 @@ bancos = [
     "MercadoPago",
     "Nacion",
     "Provincia",
+    "Provincia (Formato 2)",
     "Santander Rio",
     "Supervielle",
 ]
@@ -71,6 +73,8 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_nacion(archivo_pdf)
     elif banco_seleccionado == "Provincia":
         return procesar_provincia(archivo_pdf)
+    elif banco_seleccionado == "Provincia (Formato 2)":
+        return procesar_provincia_formato_2(archivo_pdf)
     elif banco_seleccionado == "Supervielle":
         return procesar_supervielle(archivo_pdf)
     elif banco_seleccionado == "Hipotecario":

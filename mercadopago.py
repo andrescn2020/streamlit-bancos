@@ -33,6 +33,10 @@ def procesar_mercadopago(archivo_pdf):
         
         lineas = texto.splitlines()
 
+        # Variables para corte de página (descripción huérfana)
+        prefijo_pendiente = ""
+        just_completed_movement = False
+
         # Variables para almacenar la información
         saldo_inicial = None
         saldo_final = None
@@ -94,6 +98,13 @@ def procesar_mercadopago(archivo_pdf):
             if match_fecha_inicio and match_fecha_inicio.start() < 20:
                 # Limpiar basura anterior a la fecha
                 linea = linea[match_fecha_inicio.start():]
+                # Prefijar texto huérfano de corte de página
+                if prefijo_pendiente:
+                    fecha_str = linea[:10]
+                    resto = linea[10:].strip()
+                    linea = fecha_str + " " + prefijo_pendiente + " " + resto
+                    prefijo_pendiente = ""
+                just_completed_movement = False
                 linea_movimiento = linea
 
                 # Verificar si la línea actual contiene los montos
@@ -210,6 +221,7 @@ def procesar_mercadopago(archivo_pdf):
                             "Importe": importe,
                         }
                         movimientos.append(movimiento)
+                        just_completed_movement = True
 
                     elif len(montos_validos) == 1:
                         # Si solo hay un monto válido
@@ -256,6 +268,30 @@ def procesar_mercadopago(archivo_pdf):
                             "Importe": importe,
                         }
                         movimientos.append(movimiento)
+                        just_completed_movement = True
+
+            else:
+                # Detectar texto descriptivo huérfano por corte de página
+                # Solo si acabamos de completar un movimiento
+                if just_completed_movement and linea:
+                    es_ignorable = (
+                        re.match(r"^\d+\s*/\s*\d+", linea) or
+                        re.match(r"^Fecha\s+Descripci", linea) or
+                        re.match(r"^operaci", linea, re.IGNORECASE) or
+                        "$" in linea or
+                        "Saldo inicial:" in linea or
+                        "Saldo final:" in linea or
+                        "RESUMEN DE CUENTA" in linea or
+                        "Periodo:" in linea or "Período:" in linea or
+                        linea.startswith("CVU:") or
+                        "mercadopago" in linea.lower() or
+                        "Mercado Libre" in linea or
+                        re.match(r"^\d+$", linea)
+                    )
+                    if not es_ignorable:
+                        prefijo_pendiente = (prefijo_pendiente + " " + linea).strip() if prefijo_pendiente else linea
+                    else:
+                        just_completed_movement = False
 
             i += 1
 
