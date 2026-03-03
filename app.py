@@ -17,6 +17,7 @@ from mercadopago import procesar_mercadopago
 from credicoop_2 import procesar_credicoop_formato_2
 from macro_2 import procesar_macro_formato_2
 from macro_3 import procesar_macro_formato_3
+from macro_4 import procesar_macro_formato_4
 from galicia_mas import procesar_galicia_mas
 from comafi import procesar_comafi
 
@@ -38,6 +39,7 @@ bancos = [
     "Macro",
     "Macro (Formato 2)",
     "Macro (Formato 3)",
+    "Macro (Formato 4)",
     "MercadoPago",
     "Nacion",
     "Provincia",
@@ -69,6 +71,8 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_macro_formato_2(archivo_pdf)
     elif banco_seleccionado == "Macro (Formato 3)":
         return procesar_macro_formato_3(archivo_pdf)
+    elif banco_seleccionado == "Macro (Formato 4)":
+        return procesar_macro_formato_4(archivo_pdf)
     elif banco_seleccionado == "Nacion":
         return procesar_nacion(archivo_pdf)
     elif banco_seleccionado == "Provincia":
@@ -105,7 +109,7 @@ archivo_pdf = st.file_uploader("Sube un archivo PDF", type=["pdf"])
 
 # Debug checkbox (solo para bancos que lo soportan)
 debug_mode = False
-# if banco_seleccionado in ["..."]:
+# if banco_seleccionado in ["Macro (Formato 2)", "Macro (Formato 4)"]:
 #     debug_mode = st.checkbox("🔍 Modo Debug (ver texto del PDF)", value=False)
 
 if archivo_pdf is not None:

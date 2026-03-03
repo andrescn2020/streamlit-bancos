@@ -55,93 +55,149 @@ def procesar_macro_formato_2(archivo_pdf):
             cuenta = match_cuenta.group(1)
 
         # 2. Movimientos
-        transactions = []
-        # Formato linea: Fecha Ref1 Ref2 Descripcion Importe Saldo
-        # 31/01/2025 60363513 3861 CCERR BOBIARE SA 30711511004 $ 50.000,00 $ 11.765,02
-        # Regex complejo para capturar:
-        # G1: Fecha
-        # G2: Refs (numeros)
-        # G3: Descripcion
-        # G4: Importe ($ X.XXX,XX)
-        # G5: Saldo ($ X.XXX,XX)
+        # Separar el texto completo en bloques usando la fecha de inicio de transacción como delimitador
+        blocks = re.split(r"(?m)^(?=\d{2}/\d{2}/\d{4})", texto_completo)
         
-        # Estrategia: Buscar fecha al inicio y dos montos al final.
-        # Lo del medio es refs y descripcion.
+        # Patrón para montos (Soporta ej: -$ 303.000,00 | $ 63.330,36 | - 1.840,00 | 250.000,00)
+        amounts_pattern = r"(?:-\s*)?(?:\$\s*)?(?:-\s*)?\d[\d\.\s]*,\d{2}"
         
-        for line in lineas:
-            line = line.strip()
-            if not re.match(r"^\d{2}/\d{2}/\d{4}", line):
-                continue
+        pending_amounts = []
+        header_orphans = []
+        
+        def has_alpha(s):
+            return any(c.isalpha() for c in s)
+        
+        if len(blocks) > 0:
+            header = blocks[0]
+            # Extraer montos que puedan haber quedado "huérfanos" arriba
+            pending_amounts.extend(re.findall(amounts_pattern, header))
             
-            # Buscar los montos al final
-            # Regex: (Fecha) ... (Monto1) (Monto2)
-            # Monto pattern: \$?\s?-?[\d\.]+,\d{2}
-            
-            parts = line.split()
-            if len(parts) < 5: continue
-            
-            fecha = parts[0]
-            
-            # Buscamos tokens de monto desde el final
-            # Expected: Saldo (last), Importe (second last)
-            # Pero hay que tener cuidado con espacios dentro de "$ 50.000,00"
-            # pdfplumber a veces extrae "$ 50.000,00" como ["$", "50.000,00"] o ["$50.000,00"]
-            
-            # Reconstruyamos la linea y usemos regex para extraer montos
-            # Pattern para monto arg con signo opcional y simbolo pesos opcional:
-            # Flexibilizado para permitir espacios intercalados (pdfplumber quirks)
-            # Regex busca: (optional $) (optional -) (digits/dots/spaces) (comma) (2 digits)
-            
-            montos = re.findall(r"(?:\$\s*)?-?[\d\.\s]+,\d{2}", line)
-            
-            if len(montos) >= 2:
-                saldo_str = montos[-1]
-                importe_str = montos[-2]
+            # Extraer lineas huerfanas de texto (como una descripcion adelantada)
+            for hl in header.splitlines():
+                hl_c = hl.strip()
+                if not hl_c: continue
+                # Si es un monto puro lo ignora (ya lo sacamos)
+                hl_test = re.sub(amounts_pattern, "", hl_c).strip()
+                if not hl_test: continue
                 
-                # Descripcion: Todo lo que esta antes del importe
-                # Linea: "31/01/2025 ... Desc ... $ 50.000,00 $ 11.765,02"
-                # Encontramos el index donde empieza el importe_str en la linea
-                idx_importe = line.rfind(importe_str)
-                if idx_importe == -1: continue
+                # Ignorar basura de cabecera
+                hl_up = hl_c.upper()
+                if "ÚLTIMOS MOVIMIENTOS" in hl_up or "NÚMERO DE CUENTA" in hl_up: continue
+                if hl_up in ["NRO.", "TRANSACCIÓN"]: continue
+                if "FECHA DESCRIPCIÓN IMPORTE SALDO" in hl_up or "FECHA" in hl_up and "IMPORTE" in hl_up: continue
                 
-                resto = line[:idx_importe].strip()
-                # resto = "31/01/2025 60363513 3861 CCERR BOBIARE SA 30711511004"
-                # Quitar saldo anterior si se coló (que seria el importe si extrajimos 3 montos?)
-                # No, findall devuelve non-overlapping.
+                header_orphans.append(hl_c)
+        
+        raw_txs = []
+        
+        if len(blocks) > 1:
+            for block in blocks[1:]:
+                fecha_match = re.search(r"^(\d{2}/\d{2}/\d{4})", block)
+                if not fecha_match:
+                    continue
+                fecha = fecha_match.group(1)
                 
-                # Quitar fecha del inicio
-                resto = resto[10:].strip()
+                block_amounts = re.findall(amounts_pattern, block)
+                available = pending_amounts + block_amounts
                 
-                # Quitar numeros de referencia al inicio (opcional)
-                # "60363513 3861 CCERR..."
-                # A veces son utiles, dejemoslo en descripcion o limpiarlo?
-                # El usuario suele querer descripcion limpia.
-                # Intentemos quitar los primeros tokens si son solo digitos
-                desc_parts = resto.split()
-                start_desc = 0
-                for i, p in enumerate(desc_parts):
-                    if p.isdigit() and len(p) > 2: # Asumimos ref es numero largo
-                        continue
-                    else:
-                        start_desc = i
-                        break
-                
-                descripcion = " ".join(desc_parts[start_desc:])
-                
+                # Asignaremos los 2 primeros montos al movimiento, y el resto quedan guardados
+                if len(available) >= 2:
+                    importe_str = available[0]
+                    saldo_str = available[1]
+                    pending_amounts = available[2:]
+                elif len(available) == 1:
+                    importe_str = available[0]
+                    saldo_str = "0,00"
+                    pending_amounts = []
+                else:
+                    importe_str = "0,00"
+                    saldo_str = "0,00"
+                    pending_amounts = []
+                    
                 importe_val = parse_amount(importe_str)
                 saldo_val = parse_amount(saldo_str)
                 
-                transactions.append({
-                    "Fecha": fecha,
-                    "Descripcion": clean_for_excel(descripcion),
-                    "Importe": importe_val,
-                    "Saldo": saldo_val
+                lineas_block = block.splitlines()
+                header_line = lineas_block[0]
+                header_line = header_line[len(fecha):] # quitar fecha
+                
+                for m in block_amounts:
+                    header_line = header_line.replace(m, "", 1)
+                
+                desc_parts = header_line.split()
+                # Limpiar numeros de referencia largos al inicio
+                start_idx = 0
+                for i, p in enumerate(desc_parts):
+                    if p.isdigit() and len(p) > 2:
+                        continue
+                    else:
+                        start_idx = i
+                        break
+                
+                header_desc = " ".join(desc_parts[start_idx:]).strip()
+                
+                # Buscar orphans (texto en lineas inferiores que pertenece a esta o la proxima transaccion)
+                orphans = []
+                for ol in lineas_block[1:]:
+                    ol_c = ol.strip()
+                    if not ol_c: continue
+                    ol_test = re.sub(amounts_pattern, "", ol_c).strip()
+                    if not ol_test: continue
+                    
+                    ol_up = ol_c.upper()
+                    if "SALDO FINAL AL DIA" in ol_up:
+                        idx = ol_up.find("SALDO FINAL AL DIA")
+                        ol_c = ol_c[:idx].strip()
+                        if not ol_c: continue
+                    
+                    if "PÁGINA" in ol_up or "HOJA" in ol_up: continue
+                    
+                    orphans.append(ol_c)
+                    
+                raw_txs.append({
+                    "fecha": fecha,
+                    "importe": importe_val,
+                    "saldo": saldo_val,
+                    "header_desc": header_desc,
+                    "orphans": orphans,
+                    "orphans_above": []
                 })
+
+        # PRE-PASS: Mover orphans_below a orphans_above si la siguiente transaccion no tiene descripcion
+        if len(raw_txs) > 0:
+            if not has_alpha(raw_txs[0]['header_desc']):
+                raw_txs[0]['orphans_above'] = header_orphans
+                
+            for i in range(len(raw_txs) - 1):
+                cur = raw_txs[i]
+                nxt = raw_txs[i+1]
+                
+                if not has_alpha(nxt['header_desc']) and cur['orphans']:
+                    nxt['orphans_above'] = cur['orphans']
+                    cur['orphans'] = []
+                    
+        # Construir descripciones finales y DataFrame
+        transactions = []
+        for tx in raw_txs:
+            final_desc_list = []
+            if tx['orphans_above']:
+                final_desc_list.extend(tx['orphans_above'])
+            if tx['header_desc']:
+                final_desc_list.append(tx['header_desc'])
+            if tx['orphans']:
+                final_desc_list.extend(tx['orphans'])
+                
+            final_desc = " ".join(final_desc_list)
+            
+            transactions.append({
+                "Fecha": tx["fecha"],
+                "Descripcion": clean_for_excel(final_desc),
+                "Importe": tx["importe"],
+                "Saldo": tx["saldo"]
+            })
 
         if not transactions:
             st.warning("No se encontraron movimientos")
-            with st.expander("Ver Texto (Debug)"):
-                st.text(texto_completo)
             return None
 
         # Ordenar cronologicamente ascendente (vienen descendente)
