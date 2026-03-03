@@ -16,20 +16,27 @@ def clean_for_excel(text):
     text = ILLEGAL_CHARACTERS_RE.sub("", text)
     return text.strip()
 
-def parse_numero_ar(texto):
-    """Convierte número con formato argentino (1.234.567,89) a float"""
-    texto = texto.strip().replace(".", "").replace(",", ".")
-    return float(texto)
+def parse_numero(texto):
+    """Convierte número a float detectando si el formato es AR (1.234,56) o US (1,234.56)"""
+    texto = texto.strip()
+    if not texto: return 0.0
+    
+    if len(texto) >= 3 and texto[-3] == '.':
+        return float(texto.replace(",", ""))
+    elif len(texto) >= 3 and texto[-3] == ',':
+        return float(texto.replace(".", "").replace(",", "."))
+    else:
+        return float(texto.replace(",", ""))
 
 def extraer_importe_del_final(texto):
-    """Extrae un número AR del final del texto, eligiendo el grupo inicial MÁS PEQUEÑO.
+    """Extrae un número del final del texto, eligiendo el grupo inicial MÁS PEQUEÑO.
     Esto evita incluir dígitos de números de referencia concatenados.
     Ej: '...9651.663,74' → 1.663,74 (no 651.663,74)"""
-    # Buscar la parte de miles+decimales al final: (.ddd)* ,dd
-    m = re.search(r'((?:\.\d{3})*,\d{2})$', texto)
+    # Buscar la parte de miles+decimales al final
+    m = re.search(r'((?:[.,]\d{3})*[.,]\d{2})$', texto)
     if not m:
         return None
-    suffix = m.group(1)  # ej: ".663,74" o ",74"
+    suffix = m.group(1)
     prefix_end = m.start()
 
     # Intentar 1, 2, luego 3 dígitos para el primer grupo (el más chico primero)
@@ -41,8 +48,8 @@ def extraer_importe_del_final(texto):
         if re.match(r'^\d{' + str(n_digits) + r'}$', first_group):
             # Ver si hay signo negativo antes
             if start > 0 and texto[start - 1] == '-':
-                return parse_numero_ar('-' + first_group + suffix)
-            return parse_numero_ar(first_group + suffix)
+                return parse_numero('-' + first_group + suffix)
+            return parse_numero(first_group + suffix)
     return None
 
 def procesar_provincia_formato_2(archivo_pdf):
@@ -102,7 +109,7 @@ def procesar_provincia_formato_2(archivo_pdf):
 
         # Parsear cada movimiento: extraer fecha y saldo (siempre separado por espacio).
         # El importe se calcula después desde diferencias de saldos.
-        saldo_re = re.compile(r"\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})$")
+        saldo_re = re.compile(r"\s+(-?\d{1,3}(?:[.,]\d{3})*[.,]\d{2})$")
 
         movimientos = []
         for raw in movimientos_raw:
@@ -116,7 +123,7 @@ def procesar_provincia_formato_2(archivo_pdf):
             saldo_match = saldo_re.search(rest)
             if not saldo_match:
                 continue
-            saldo = parse_numero_ar(saldo_match.group(1))
+            saldo = parse_numero(saldo_match.group(1))
             rest_sin_saldo = rest[:saldo_match.start()]
 
             # Extraer descripción: sacar el importe del final del texto restante
@@ -126,7 +133,7 @@ def procesar_provincia_formato_2(archivo_pdf):
                 descripcion = rest_sin_saldo[:importe_match.start()].strip()
             else:
                 # Importe pegado a texto (ej: referencia concatenada) → limpiar
-                desc_clean = re.sub(r"-?\d{1,3}(?:\.\d{3})*,\d{2}$", "", rest_sin_saldo)
+                desc_clean = re.sub(r"-?\d{1,3}(?:[.,]\d{3})*[.,]\d{2}$", "", rest_sin_saldo)
                 descripcion = desc_clean.strip()
 
             movimientos.append({
