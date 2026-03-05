@@ -20,12 +20,14 @@ from macro_3 import procesar_macro_formato_3
 from macro_4 import procesar_macro_formato_4
 from galicia_mas import procesar_galicia_mas
 from comafi import procesar_comafi
+from ciudad import procesar_ciudad
 
 st.set_page_config(page_title="Movimientos Bancos", page_icon="🏦")
 
 # Lista de bancos (orden alfabético)
 bancos = [
     "BBVA Frances",
+    "Ciudad",
     "Comafi",
     "Credicoop",
     "Credicoop (Formato 2)",
@@ -93,6 +95,8 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_mercadopago(archivo_pdf)
     elif banco_seleccionado == "Comafi":
         return procesar_comafi(archivo_pdf)
+    elif banco_seleccionado == "Ciudad":
+        return procesar_ciudad(archivo_pdf)
     else:
         st.info(f"Lógica para {banco_seleccionado} aún no implementada")
         return None
