@@ -256,10 +256,6 @@ def procesar_patagonia_formato_2(archivo_pdf):
 
         lineas = texto_completo.splitlines()
 
-        # DEBUG: mostrar texto extraído
-        with st.expander("🔍 Debug: Ver texto extraído del PDF"):
-            st.text_area("Texto del PDF", texto_completo, height=400)
-
         # 1. METADATOS
         titular = "Sin Especificar"
         for line in lineas:
