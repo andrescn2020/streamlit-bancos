@@ -21,6 +21,8 @@ from macro_4 import procesar_macro_formato_4
 from galicia_mas import procesar_galicia_mas
 from comafi import procesar_comafi
 from ciudad import procesar_ciudad
+from patagonia import procesar_patagonia
+from patagonia_2 import procesar_patagonia_formato_2
 
 st.set_page_config(page_title="Movimientos Bancos", page_icon="🏦")
 
@@ -44,6 +46,8 @@ bancos = [
     "Macro (Formato 4)",
     "MercadoPago",
     "Nacion",
+    "Patagonia",
+    "Patagonia (Formato 2)",
     "Provincia",
     "Provincia (Formato 2)",
     "Santander Rio",
@@ -97,6 +101,10 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_comafi(archivo_pdf)
     elif banco_seleccionado == "Ciudad":
         return procesar_ciudad(archivo_pdf)
+    elif banco_seleccionado == "Patagonia":
+        return procesar_patagonia(archivo_pdf)
+    elif banco_seleccionado == "Patagonia (Formato 2)":
+        return procesar_patagonia_formato_2(archivo_pdf)
     else:
         st.info(f"Lógica para {banco_seleccionado} aún no implementada")
         return None
