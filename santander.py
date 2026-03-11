@@ -28,6 +28,7 @@ def procesar_santander_rio(archivo_pdf):
         # Abrir el PDF usando PyPDF2
         reader = PyPDF2.PdfReader(io.BytesIO(archivo_pdf.read()))
         texto_completo = "".join(page.extract_text() + "\n" for page in reader.pages)
+        
         lineas_raw = texto_completo.splitlines()
 
         # 1. Metadatos (Titular, Periodo)
@@ -92,6 +93,15 @@ def procesar_santander_rio(archivo_pdf):
             
             # Pre-procesado para unir líneas
             for l in lineas:
+                # Filtrar encabezados repetidos de página (ej: "2 -  11")
+                if re.match(r'^\s*\d+\s*-\s+\d+\s*$', l.strip()):
+                    continue
+                # Filtrar encabezados de tabla repetidos
+                if "Cuenta Corriente" in l and ("CBU:" in l or "Nº" in l):
+                    continue
+                if "FechaComprobante" in l or "FechaComprobanteMovimiento" in l:
+                    continue
+
                 # Extraer saldos si aparecen en la sección
                 if "Saldo Inicial" in l:
                     matches = re.findall(r"(-?)\$\s?([\d\.]+,\d{2})|(-?)U\$S\s?([\d\.]+,\d{2})", l)
@@ -129,19 +139,16 @@ def procesar_santander_rio(archivo_pdf):
                     linea_actual += " " + l
             if linea_actual: movimientos_text.append(linea_actual.strip())
 
-            # Parsear Movimientos
+            # Parsear Movimientos usando diferencia de saldos
             parsed_data = []
+            saldo_anterior = saldo_ini  # Arrancar con el saldo inicial
+            
             for mov in movimientos_text:
                 if "Movimientos en" in mov: continue 
                 if "Saldo Inicial" in mov: continue # Filtrar Saldo Inicial siempre
                 
                 fecha = mov[:8]
                 resto = mov[8:]
-                
-                # Heurística: Buscar importe al final. 
-                # Patrón: (opcional signo) (Símbolo $ o U$S) (numero) (Saldo final acumulado)
-                # El saldo final acumulado suele estar al final de la linea.
-                # Ejemplo: ... -$ 100.000,00 $ 6.376.160,86
                 
                 # Limpieza basica de moneda para facilitar regex unico
                 mov_clean = mov.replace("U$S", "$").replace("U$s", "$")
@@ -153,29 +160,21 @@ def procesar_santander_rio(archivo_pdf):
                 desc = ""
                 
                 if len(montos) >= 2:
-                    # Asumimos: Penultimo es el importe del movimiento, Ultimo es el saldo
-                    str_imp = montos[-2]
-                    # Limpiar
-                    signo = -1 if "-" in str_imp else 1
-                    clean_imp = str_imp.replace("$", "").replace("-", "").strip().replace(".", "").replace(",", ".")
+                    # El ÚLTIMO monto es el saldo acumulado (balance running)
+                    str_saldo = montos[-1]
+                    clean_saldo = str_saldo.replace("$", "").replace("+", "").replace("-", "").strip().replace(".", "").replace(",", ".")
+                    signo_saldo = -1 if "-" in str_saldo else 1
                     try:
-                        importe = float(clean_imp) * signo
-                    except: importe = 0.0
+                        saldo_actual = float(clean_saldo) * signo_saldo
+                    except:
+                        saldo_actual = saldo_anterior
                     
-                    # Descripción es todo lo que hay antes del importe
-                    # Buscamos donde empieza el str_imp en la linea original/limpia
-                    # Ojo: rfind podría fallar si hay montos iguales en la descripción.
-                    # Usamos split o regex inverso.
+                    # Importe = diferencia de saldos (positivo = crédito, negativo = débito)
+                    importe = round(saldo_actual - saldo_anterior, 2)
+                    saldo_anterior = saldo_actual
                     
-                    # Metodo seguro: Regex que capture Fecha + Descrip + Importe + Saldo
-                    # Pero la descripcion es muy sucia.
-                    
-                    # Usaremos el indice del penultimo match
-                    # Esto es aproximado pero la logica anterior era peor.
-                    pass # Ya tenemos importe
-                    
-                    # Descripcion: eliminar fecha inicial y la parte de los montos finales
-                    # Aproximacion: Cortar donde aparece el texto del importe
+                    # Descripción: todo lo que hay antes del penúltimo monto
+                    str_imp = montos[-2]
                     idx_imp = mov_clean.rfind(str_imp) 
                     if idx_imp != -1:
                         desc = mov[:idx_imp] # Incluye fecha en los primeros 8 chars
@@ -200,6 +199,7 @@ def procesar_santander_rio(archivo_pdf):
         datos_pesos, saldo_ini_pesos, saldo_fin_pesos = extraer_datos_seccion(lineas_pesos)
         datos_dolares, saldo_ini_dolares, saldo_fin_dolares = extraer_datos_seccion(lineas_dolares)
         
+
         # --- GENERACIÓN EXCEL MULTI-HOJA ---
         output = io.BytesIO()
         wb = Workbook()
