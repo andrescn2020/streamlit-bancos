@@ -1,6 +1,7 @@
 import streamlit as st
 from frances import procesar_bbva_frances
 from santander import procesar_santander_rio
+from santander_prueba import procesar_santander_rio_prueba
 from galicia import procesar_galicia
 from icbc import procesar_icbc
 from icbc_2 import procesar_icbc_formato_2
@@ -51,6 +52,7 @@ bancos = [
     "Provincia",
     "Provincia (Formato 2)",
     "Santander Rio",
+    "Santander Rio (Prueba)",
     "Supervielle",
 ]
 
@@ -61,6 +63,8 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_bbva_frances(archivo_pdf)
     elif banco_seleccionado == "Santander Rio":
         return procesar_santander_rio(archivo_pdf)
+    elif banco_seleccionado == "Santander Rio (Prueba)":
+        return procesar_santander_rio_prueba(archivo_pdf, cuits_propios=cuits_propios)
     elif banco_seleccionado == "Galicia":
         return procesar_galicia(archivo_pdf)
     elif banco_seleccionado == "Galicia Más":
@@ -115,6 +119,26 @@ st.title("Selector de Banco y Subida de PDF")
 
 # Selector de banco
 banco_seleccionado = st.selectbox("Selecciona un banco:", bancos)
+
+# Input CUITs propios (solo para Santander Prueba)
+cuits_propios = []
+if banco_seleccionado == "Santander Rio (Prueba)":
+    st.markdown("---")
+    st.subheader("CUITs propios (transferencias entre bancos)")
+    st.caption("Agregá los CUITs del titular, socios o dueños para identificar transferencias propias.")
+    cant_cuits = st.number_input("Cantidad de CUITs", min_value=0, max_value=10, value=0, step=1)
+    for i in range(int(cant_cuits)):
+        col1, col2 = st.columns(2)
+        with col1:
+            cuit = st.text_input(f"CUIT #{i+1}", key=f"cuit_{i}", placeholder="30711511004")
+        with col2:
+            razon = st.text_input(f"Razón Social #{i+1}", key=f"razon_{i}", placeholder="Empresa SA")
+        if cuit and cuit.strip() or razon and razon.strip():
+            cuit_val = cuit.strip().replace("-", "") if cuit else ""
+            razon_val = razon.strip() if razon else ""
+            label = razon_val if razon_val else f"CUIT {cuit_val}"
+            cuits_propios.append((cuit_val, razon_val, label))
+    st.markdown("---")
 
 # Subida de archivo PDF
 archivo_pdf = st.file_uploader("Sube un archivo PDF", type=["pdf"])
