@@ -24,12 +24,14 @@ from comafi import procesar_comafi
 from ciudad import procesar_ciudad
 from patagonia import procesar_patagonia
 from patagonia_2 import procesar_patagonia_formato_2
+from brubank import procesar_brubank
 
 st.set_page_config(page_title="Movimientos Bancos", page_icon="🏦")
 
 # Lista de bancos (orden alfabético)
 bancos = [
     "BBVA Frances",
+    "Brubank",
     "Ciudad",
     "Comafi",
     "Credicoop",
@@ -61,6 +63,8 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
     """Función principal que dirige el procesamiento según el banco seleccionado"""
     if banco_seleccionado == "BBVA Frances":
         return procesar_bbva_frances(archivo_pdf)
+    elif banco_seleccionado == "Brubank":
+        return procesar_brubank(archivo_pdf)
     elif banco_seleccionado == "Santander Rio":
         return procesar_santander_rio(archivo_pdf)
     elif banco_seleccionado == "Santander Rio (Prueba)":
