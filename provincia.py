@@ -67,69 +67,101 @@ def procesar_provincia(archivo_pdf):
         
         saldo_anterior = None # Para el loop
         linea_actual = ""
+        advertencias = []
 
         # Patrón que busca los movimientos
-        # Fecha ... Descripcion ... FechaCorta ... Saldo
+        # Fecha ... Descripcion ... Importe ... FechaCorta ... Saldo
+        # El Importe se lee literal del PDF (no se deriva restando saldos:
+        # eso es fragil si alguna linea no matchea, ya que contamina el
+        # calculo de la siguiente). El espacio antes del importe es \s*
+        # (no \s+) porque PyPDF2 a veces no deja espacio entre el texto
+        # y el signo del importe (ej. "...AUTOMATI-381.29 01-06 41333.70").
         patron_movimiento = re.compile(
-            r"^(\d{2}/\d{2}/\d{4})\s+(.*?)\s+(\d{2}-\d{2})\s+([-+]?\d+\.\d{2})$"
+            r"^(\d{2}/\d{2}/\d{4})\s+(.*?)\s*([-+]?\d+\.\d{2})\s+(\d{2}-\d{2})\s+([-+]?\d+\.\d{2})$"
         )
 
+        def procesar_bloque(texto, saldo_previo):
+            """Interpreta un bloque de texto acumulado como movimiento.
+            Devuelve (dict_movimiento_o_None, saldo_resultante).
+            Como el Importe y el Saldo se leen de forma independiente,
+            se valida que saldo_previo + importe coincida con el saldo
+            impreso: si no coincide, es la firma de un movimiento perdido
+            o mal fusionado en el medio (ej. boilerplate de salto de
+            pagina no filtrado)."""
+            m = patron_movimiento.match(texto)
+            if not m:
+                advertencias.append(f"No se pudo interpretar como movimiento: \"{texto[:100]}\"")
+                return None, saldo_previo
+
+            fecha = m.group(1)
+            descripcion = m.group(2).strip()
+            importe = float(m.group(3))
+            saldo_impreso = float(m.group(5))
+
+            saldo_esperado = round(saldo_previo + importe, 2)
+            if abs(saldo_esperado - saldo_impreso) > 0.01:
+                advertencias.append(
+                    f"Salto de saldo inesperado despues de '{fecha} {descripcion[:60]}': "
+                    f"esperado $ {saldo_esperado:,.2f}, impreso en el PDF $ {saldo_impreso:,.2f} "
+                    "(posible movimiento no reconocido)."
+                )
+
+            return {
+                "Fecha": fecha,
+                "Descripcion": clean_for_excel(descripcion),
+                "Importe": importe
+            }, saldo_impreso
+
         for linea in movimientos_extraidos:
-            if "SALDO ANTERIOR" in linea:
-                match = re.search(r"SALDO ANTERIOR\s+([-+]?\d+\.\d{2})", linea)
+            linea_s = linea.strip()
+            if not linea_s:
+                continue
+
+            if "SALDO ANTERIOR" in linea_s:
+                match = re.search(r"SALDO ANTERIOR\s+([-+]?\d+\.\d{2})", linea_s)
                 if match:
                     saldo_anterior = float(match.group(1))
                     saldo_inicial = saldo_anterior
-                linea_actual = linea.strip()
+                # No es un movimiento a interpretar, solo el checkpoint inicial
+                linea_actual = ""
                 continue
-            
+
             # Si empieza con fecha, procesamos la linea acomulada anterior (si existe) o preparamos nueva
-            if re.match(r"^\d{2}/\d{2}/\d{4}", linea):
-                # Si teniamos una linea actual acumulada que ERA un movimiento valido (pero esperamos multiline? No, la logica original procesa linea_actual CUANDO encuentra la SIGUIENTE fecha)
-                if linea_actual:
-                    movimiento_str = linea_actual.strip()
-                    m = patron_movimiento.match(movimiento_str)
-                    if m and saldo_anterior is not None:
-                        fecha = m.group(1)
-                        descripcion = m.group(2).strip()
-                        saldo_actual_linea = float(m.group(4))
-                        importe = saldo_actual_linea - saldo_anterior
-                        
-                        movimientos.append({
-                            "Fecha": fecha, 
-                            "Descripcion": clean_for_excel(descripcion), 
-                            "Importe": importe
-                        })
-                        saldo_anterior = saldo_actual_linea
-                
-                linea_actual = linea.strip()
+            if re.match(r"^\d{2}/\d{2}/\d{4}", linea_s):
+                if linea_actual and saldo_anterior is not None:
+                    mov, saldo_anterior = procesar_bloque(linea_actual.strip(), saldo_anterior)
+                    if mov:
+                        movimientos.append(mov)
+
+                linea_actual = linea_s
             else:
-                # Es continuación de la descripción de la línea anterior
-                linea_actual += " " + linea.strip()
+                # Puede ser una continuación legítima (wrap de descripción) o
+                # boilerplate de salto de página (titular, CUIT, CBU, encabezado
+                # de columnas repetido, etc). Si el movimiento acumulado ya es
+                # válido y completo, cualquier línea extra es boilerplate y se
+                # descarta; si no, es continuación real y se concatena.
+                if linea_actual and not patron_movimiento.match(linea_actual):
+                    linea_actual += " " + linea_s
 
         # Procesar el último movimiento remanente en linea_actual
-        if linea_actual.strip():
-            movimiento_str = linea_actual.strip()
-            m = patron_movimiento.match(movimiento_str)
-            if m and saldo_anterior is not None:
-                fecha = m.group(1)
-                descripcion = m.group(2).strip()
-                saldo_actual_linea = float(m.group(4))
-                importe = saldo_actual_linea - saldo_anterior
-                
-                movimientos.append({
-                    "Fecha": fecha, 
-                    "Descripcion": clean_for_excel(descripcion), 
-                    "Importe": importe
-                })
-                saldo_anterior = saldo_actual_linea
-        
+        if linea_actual.strip() and saldo_anterior is not None:
+            mov, saldo_anterior = procesar_bloque(linea_actual.strip(), saldo_anterior)
+            if mov:
+                movimientos.append(mov)
+
         if saldo_anterior is not None:
             saldo_final = saldo_anterior
 
         if not movimientos:
             st.warning("No se encontraron movimientos en el PDF")
             return None
+
+        if advertencias:
+            st.warning(
+                "⚠️ Se detectaron posibles inconsistencias al leer el extracto. "
+                "Revisar manualmente antes de usar el reporte:\n\n"
+                + "\n".join(f"- {a}" for a in advertencias)
+            )
 
         # --- GENERACIÓN EXCEL (DASHBOARD) ---
         output = io.BytesIO()

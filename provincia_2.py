@@ -91,10 +91,15 @@ def procesar_provincia_formato_2(archivo_pdf):
                 continue
             lineas_mov.append(stripped)
 
+        # Parsear cada movimiento: extraer fecha y saldo (siempre separado por espacio).
+        # El importe se calcula después desde diferencias de saldos.
+        saldo_re = re.compile(r"\s+(-?\d{1,3}(?:[.,]\d{3})*[.,]\d{2})$")
+
         # Agrupar líneas por movimiento (cada uno empieza con fecha dd-mmm-yyyy)
         date_start = re.compile(r"^\d{2}-\w{3}-\d{4}")
         movimientos_raw = []
         current = ""
+        advertencias = []
 
         for linea in lineas_mov:
             if date_start.match(linea):
@@ -102,19 +107,21 @@ def procesar_provincia_formato_2(archivo_pdf):
                     movimientos_raw.append(current)
                 current = linea
             else:
-                if current:
+                # Puede ser una continuación legítima (wrap de descripción) o
+                # boilerplate de salto de página que "skip_patterns" no cubrió.
+                # Si el bloque acumulado ya tiene un saldo al final, ya es un
+                # movimiento completo: cualquier línea extra se descarta en
+                # vez de corromperlo.
+                if current and not saldo_re.search(current):
                     current += " " + linea
         if current:
             movimientos_raw.append(current)
-
-        # Parsear cada movimiento: extraer fecha y saldo (siempre separado por espacio).
-        # El importe se calcula después desde diferencias de saldos.
-        saldo_re = re.compile(r"\s+(-?\d{1,3}(?:[.,]\d{3})*[.,]\d{2})$")
 
         movimientos = []
         for raw in movimientos_raw:
             date_match = re.match(r"^(\d{2}-\w{3}-\d{4})\s+(.*)$", raw, re.DOTALL)
             if not date_match:
+                advertencias.append(f"No se pudo interpretar como movimiento: \"{raw[:100]}\"")
                 continue
             fecha = date_match.group(1)
             rest = date_match.group(2)
@@ -122,6 +129,7 @@ def procesar_provincia_formato_2(archivo_pdf):
             # Extraer saldo (último número, siempre separado por espacio)
             saldo_match = saldo_re.search(rest)
             if not saldo_match:
+                advertencias.append(f"No se encontró el saldo en: \"{raw[:100]}\"")
                 continue
             saldo = parse_numero(saldo_match.group(1))
             rest_sin_saldo = rest[:saldo_match.start()]
@@ -156,6 +164,13 @@ def procesar_provincia_formato_2(archivo_pdf):
         if not movimientos:
             st.warning("No se encontraron movimientos en el PDF")
             return None
+
+        if advertencias:
+            st.warning(
+                "⚠️ Se detectaron bloques de texto que no pudieron interpretarse como "
+                "movimiento (posible información perdida). Revisar manualmente:\n\n"
+                + "\n".join(f"- {a}" for a in advertencias)
+            )
 
         # Calcular importes desde diferencias de saldos (orden inverso: más reciente primero)
         for i in range(len(movimientos) - 1):

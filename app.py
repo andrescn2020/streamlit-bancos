@@ -24,6 +24,7 @@ from comafi import procesar_comafi
 from ciudad import procesar_ciudad
 from patagonia import procesar_patagonia
 from patagonia_2 import procesar_patagonia_formato_2
+from patagonia_3 import procesar_patagonia_formato_3
 from brubank import procesar_brubank
 
 st.set_page_config(page_title="Movimientos Bancos", page_icon="🏦")
@@ -51,6 +52,7 @@ bancos = [
     "Nacion",
     "Patagonia",
     "Patagonia (Formato 2)",
+    "Patagonia (Formato 3)",
     "Provincia",
     "Provincia (Formato 2)",
     "Santander Rio",
@@ -113,6 +115,8 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_patagonia(archivo_pdf)
     elif banco_seleccionado == "Patagonia (Formato 2)":
         return procesar_patagonia_formato_2(archivo_pdf)
+    elif banco_seleccionado == "Patagonia (Formato 3)":
+        return procesar_patagonia_formato_3(archivo_pdf)
     else:
         st.info(f"Lógica para {banco_seleccionado} aún no implementada")
         return None
