@@ -80,14 +80,30 @@ def procesar_provincia(archivo_pdf):
             r"^(\d{2}/\d{2}/\d{4})\s+(.*?)\s*([-+]?\d+\.\d{2})\s+(\d{2}-\d{2})\s+([-+]?\d+\.\d{2})$"
         )
 
+        def es_inicio_de_movimiento(texto):
+            """Determina si una linea es el arranque de un movimiento nuevo.
+            No alcanza con chequear que empiece con fecha: algunas
+            descripciones (ej. debitos de seguros MAPFRE) incluyen una
+            referencia que termina en una fecha propia (ej. una fecha de
+            poliza), y esa fecha puede terminar sola en su propia linea o
+            pegada directamente al importe de la linea siguiente (sin
+            espacio). Una fecha que arranca un movimiento real siempre
+            esta seguida de texto (la descripcion); si no hay nada despues
+            o lo que sigue no es una letra, es un resto de continuacion,
+            no un movimiento nuevo."""
+            m = re.match(r"^\d{2}/\d{2}/\d{4}\s+(\S)", texto)
+            return bool(m and m.group(1).isalpha())
+
         def procesar_bloque(texto, saldo_previo):
             """Interpreta un bloque de texto acumulado como movimiento.
             Devuelve (dict_movimiento_o_None, saldo_resultante).
-            Como el Importe y el Saldo se leen de forma independiente,
-            se valida que saldo_previo + importe coincida con el saldo
-            impreso: si no coincide, es la firma de un movimiento perdido
-            o mal fusionado en el medio (ej. boilerplate de salto de
-            pagina no filtrado)."""
+            Como el Importe y el Saldo se leen de forma independiente, se
+            usa el saldo impreso para validar/corregir el importe leido:
+            si no coinciden con saldo_previo, el importe se recalcula a
+            partir de la diferencia de saldos (ej. cuando un numero de
+            referencia queda pegado al importe sin espacio, como
+            "5064"+"3006607.87" -> "50643006607.87") y se avisa igual, para
+            que se pueda revisar la descripcion manualmente."""
             m = patron_movimiento.match(texto)
             if not m:
                 advertencias.append(f"No se pudo interpretar como movimiento: \"{texto[:100]}\"")
@@ -98,13 +114,15 @@ def procesar_provincia(archivo_pdf):
             importe = float(m.group(3))
             saldo_impreso = float(m.group(5))
 
-            saldo_esperado = round(saldo_previo + importe, 2)
-            if abs(saldo_esperado - saldo_impreso) > 0.01:
+            importe_esperado = round(saldo_impreso - saldo_previo, 2)
+            if abs(importe - importe_esperado) > 0.01:
                 advertencias.append(
-                    f"Salto de saldo inesperado despues de '{fecha} {descripcion[:60]}': "
-                    f"esperado $ {saldo_esperado:,.2f}, impreso en el PDF $ {saldo_impreso:,.2f} "
-                    "(posible movimiento no reconocido)."
+                    f"Importe corregido automaticamente en '{fecha} {descripcion[:60]}': "
+                    f"el valor leido ($ {importe:,.2f}) no coincidia con el saldo impreso "
+                    f"en el PDF (se uso $ {importe_esperado:,.2f} en su lugar; revisar la "
+                    "descripcion por si quedo texto con digitos pegados)."
                 )
+                importe = importe_esperado
 
             return {
                 "Fecha": fecha,
@@ -126,8 +144,9 @@ def procesar_provincia(archivo_pdf):
                 linea_actual = ""
                 continue
 
-            # Si empieza con fecha, procesamos la linea acomulada anterior (si existe) o preparamos nueva
-            if re.match(r"^\d{2}/\d{2}/\d{4}", linea_s):
+            # Si empieza con fecha seguida de texto, procesamos la linea acumulada
+            # anterior (si existe) y arrancamos una nueva
+            if es_inicio_de_movimiento(linea_s):
                 if linea_actual and saldo_anterior is not None:
                     mov, saldo_anterior = procesar_bloque(linea_actual.strip(), saldo_anterior)
                     if mov:
@@ -158,8 +177,9 @@ def procesar_provincia(archivo_pdf):
 
         if advertencias:
             st.warning(
-                "⚠️ Se detectaron posibles inconsistencias al leer el extracto. "
-                "Revisar manualmente antes de usar el reporte:\n\n"
+                "⚠️ Se detectaron y corrigieron inconsistencias al leer el extracto "
+                "(importes recalculados desde el saldo impreso, o texto que no se "
+                "pudo interpretar). Revisar de todas formas antes de usar el reporte:\n\n"
                 + "\n".join(f"- {a}" for a in advertencias)
             )
 

@@ -227,6 +227,7 @@ def procesar_credicoop(archivo_pdf):
                     
                     mov = {
                         "Fecha": fecha,
+                        "Combte": codigo_mov or "",
                         "Descripcion": descripcion,
                         "Importe": importe
                     }
@@ -270,7 +271,7 @@ def procesar_credicoop(archivo_pdf):
         fill_col_cred = PatternFill(start_color="EBF1DE", end_color="EBF1DE", fill_type="solid")
         fill_row_cred = PatternFill(start_color="F2F9F1", end_color="F2F9F1", fill_type="solid")
 
-        ws.merge_cells("A1:G1")
+        ws.merge_cells("A1:I1")
         tit = ws["A1"]
         clean_tit = clean_for_excel(nombre_titular) or 'Desconocido'
         tit.value = f"REPORTE CREDICOOP - {clean_tit}"
@@ -300,18 +301,18 @@ def procesar_credicoop(archivo_pdf):
         ws["E3"] = clean_for_excel(nombre_titular)
         ws["E3"].font = Font(bold=True, size=11)
         ws["E3"].alignment = Alignment(horizontal='center')
-        ws.merge_cells("E3:G3")
-        for c in ["E","F","G"]: ws[f"{c}3"].border = Border(bottom=Side(style='thin', color="DDDDDD"))
+        ws.merge_cells("E3:I3")
+        for c in ["E","F","G","H","I"]: ws[f"{c}3"].border = Border(bottom=Side(style='thin', color="DDDDDD"))
 
         ws["D4"] = "PERÍODO"
         ws["D4"].alignment = Alignment(horizontal='right')
         ws["D4"].font = Font(bold=True, color="666666", size=10)
-        
+
         ws["E4"] = clean_for_excel(periodo)
         ws["E4"].font = Font(bold=True, size=11)
         ws["E4"].alignment = Alignment(horizontal='center')
-        ws.merge_cells("E4:G4")
-        for c in ["E","F","G"]: ws[f"{c}4"].border = Border(bottom=Side(style='thin', color="DDDDDD"))
+        ws.merge_cells("E4:I4")
+        for c in ["E","F","G","H","I"]: ws[f"{c}4"].border = Border(bottom=Side(style='thin', color="DDDDDD"))
 
         ws["D6"] = "CONTROL DE SALDOS"
         ws["D6"].font = Font(bold=True, size=10, color="666666")
@@ -329,20 +330,20 @@ def procesar_credicoop(archivo_pdf):
             debitos = df[df["Importe"] < 0].copy()
             debitos["Importe"] = debitos["Importe"].abs()
         else:
-            creditos = pd.DataFrame(columns=["Fecha", "Descripcion", "Importe"])
-            debitos = pd.DataFrame(columns=["Fecha", "Descripcion", "Importe"])
+            creditos = pd.DataFrame(columns=["Fecha", "Combte", "Descripcion", "Importe"])
+            debitos = pd.DataFrame(columns=["Fecha", "Combte", "Descripcion", "Importe"])
 
-        # CRÉDITOS (A-C)
+        # CRÉDITOS (A-D)
         f_header = fila_inicio
-        ws.merge_cells(f"A{f_header}:C{f_header}")
-        ws[f"A{f_header}"] = "CRÉDITOS" 
+        ws.merge_cells(f"A{f_header}:D{f_header}")
+        ws[f"A{f_header}"] = "CRÉDITOS"
         ws[f"A{f_header}"].fill = fill_head_cred
         ws[f"A{f_header}"].font = Font(bold=True, color="FFFFFF")
         ws[f"A{f_header}"].alignment = Alignment(horizontal='center')
         ws[f"A{f_header}"].border = thin_border
-        
-        headers = ["Fecha", "Descripción", "Importe"]
-        cols_cred = ["A", "B", "C"]
+
+        headers = ["Fecha", "Combte", "Descripción", "Importe"]
+        cols_cred = ["A", "B", "C", "D"]
         f_sub = f_header + 1
         for i, h in enumerate(headers):
             c = ws[f"{cols_cred[i]}{f_sub}"]
@@ -351,16 +352,16 @@ def procesar_credicoop(archivo_pdf):
             c.font = Font(bold=True)
             c.alignment = Alignment(horizontal='center')
             c.border = thin_border
-        
-        # DÉBITOS (E-G)
-        ws.merge_cells(f"E{f_header}:G{f_header}")
-        ws[f"E{f_header}"] = "DÉBITOS" 
-        ws[f"E{f_header}"].fill = fill_head_deb
-        ws[f"E{f_header}"].font = Font(bold=True, color="FFFFFF")
-        ws[f"E{f_header}"].alignment = Alignment(horizontal='center')
-        ws[f"E{f_header}"].border = thin_border
-        
-        cols_deb = ["E", "F", "G"]
+
+        # DÉBITOS (F-I)
+        ws.merge_cells(f"F{f_header}:I{f_header}")
+        ws[f"F{f_header}"] = "DÉBITOS"
+        ws[f"F{f_header}"].fill = fill_head_deb
+        ws[f"F{f_header}"].font = Font(bold=True, color="FFFFFF")
+        ws[f"F{f_header}"].alignment = Alignment(horizontal='center')
+        ws[f"F{f_header}"].border = thin_border
+
+        cols_deb = ["F", "G", "H", "I"]
         for i, h in enumerate(headers):
             c = ws[f"{cols_deb[i]}{f_sub}"]
             c.value = h
@@ -375,7 +376,7 @@ def procesar_credicoop(archivo_pdf):
         # 1. CRÉDITOS
         f_cred = fila_dato_start
         if creditos.empty:
-            ws.merge_cells(f"A{f_cred}:C{f_cred}")
+            ws.merge_cells(f"A{f_cred}:D{f_cred}")
             ws[f"A{f_cred}"] = "SIN MOVIMIENTOS"
             ws[f"A{f_cred}"].font = Font(italic=True, color="666666")
             ws[f"A{f_cred}"].alignment = Alignment(horizontal='center')
@@ -389,76 +390,86 @@ def procesar_credicoop(archivo_pdf):
                 ws[f"A{f_cred}"].alignment = Alignment(horizontal='center')
                 ws[f"A{f_cred}"].border = thin_border
 
-                ws[f"B{f_cred}"] = clean_for_excel(r["Descripcion"])
+                ws[f"B{f_cred}"] = clean_for_excel(r["Combte"])
                 ws[f"B{f_cred}"].fill = fill_row_cred
+                ws[f"B{f_cred}"].alignment = Alignment(horizontal='center')
                 ws[f"B{f_cred}"].border = thin_border
 
-                ws[f"C{f_cred}"] = r["Importe"]
-                ws[f"C{f_cred}"].number_format = '"$ "#,##0.00'
+                ws[f"C{f_cred}"] = clean_for_excel(r["Descripcion"])
                 ws[f"C{f_cred}"].fill = fill_row_cred
                 ws[f"C{f_cred}"].border = thin_border
+
+                ws[f"D{f_cred}"] = r["Importe"]
+                ws[f"D{f_cred}"].number_format = '"$ "#,##0.00'
+                ws[f"D{f_cred}"].fill = fill_row_cred
+                ws[f"D{f_cred}"].border = thin_border
                 f_cred += 1
-            
+
             # Total Créditos
-            ws.merge_cells(f"A{f_cred}:B{f_cred}")
+            ws.merge_cells(f"A{f_cred}:C{f_cred}")
             ws[f"A{f_cred}"] = "TOTAL CRÉDITOS"
             ws[f"A{f_cred}"].font = Font(bold=True)
             ws[f"A{f_cred}"].alignment = Alignment(horizontal='right')
             ws[f"A{f_cred}"].fill = fill_col_cred
             ws[f"A{f_cred}"].border = thin_border
-            
-            ws[f"C{f_cred}"] = f"=SUM(C{start_c}:C{f_cred-1})"
-            ws[f"C{f_cred}"].number_format = '"$ "#,##0.00'
-            ws[f"C{f_cred}"].font = Font(bold=True)
-            ws[f"C{f_cred}"].fill = fill_col_cred
-            ws[f"C{f_cred}"].border = thin_border
+
+            ws[f"D{f_cred}"] = f"=SUM(D{start_c}:D{f_cred-1})"
+            ws[f"D{f_cred}"].number_format = '"$ "#,##0.00'
+            ws[f"D{f_cred}"].font = Font(bold=True)
+            ws[f"D{f_cred}"].fill = fill_col_cred
+            ws[f"D{f_cred}"].border = thin_border
             f_cred += 1
 
         # 2. DÉBITOS
         f_deb = fila_dato_start
         if debitos.empty:
-            ws.merge_cells(f"E{f_deb}:G{f_deb}")
-            ws[f"E{f_deb}"] = "SIN MOVIMIENTOS"
-            ws[f"E{f_deb}"].font = Font(italic=True, color="666666")
-            ws[f"E{f_deb}"].alignment = Alignment(horizontal='center')
-            ws[f"E{f_deb}"].border = thin_border
+            ws.merge_cells(f"F{f_deb}:I{f_deb}")
+            ws[f"F{f_deb}"] = "SIN MOVIMIENTOS"
+            ws[f"F{f_deb}"].font = Font(italic=True, color="666666")
+            ws[f"F{f_deb}"].alignment = Alignment(horizontal='center')
+            ws[f"F{f_deb}"].border = thin_border
             f_deb += 1
         else:
             start_d = f_deb
             for _, r in debitos.iterrows():
-                ws[f"E{f_deb}"] = r["Fecha"]
-                ws[f"E{f_deb}"].fill = fill_row_deb
-                ws[f"E{f_deb}"].alignment = Alignment(horizontal='center')
-                ws[f"E{f_deb}"].border = thin_border
-
-                ws[f"F{f_deb}"] = clean_for_excel(r["Descripcion"])
+                ws[f"F{f_deb}"] = r["Fecha"]
                 ws[f"F{f_deb}"].fill = fill_row_deb
+                ws[f"F{f_deb}"].alignment = Alignment(horizontal='center')
                 ws[f"F{f_deb}"].border = thin_border
 
-                ws[f"G{f_deb}"] = r["Importe"]
-                ws[f"G{f_deb}"].number_format = '"$ "#,##0.00'
+                ws[f"G{f_deb}"] = clean_for_excel(r["Combte"])
                 ws[f"G{f_deb}"].fill = fill_row_deb
+                ws[f"G{f_deb}"].alignment = Alignment(horizontal='center')
                 ws[f"G{f_deb}"].border = thin_border
+
+                ws[f"H{f_deb}"] = clean_for_excel(r["Descripcion"])
+                ws[f"H{f_deb}"].fill = fill_row_deb
+                ws[f"H{f_deb}"].border = thin_border
+
+                ws[f"I{f_deb}"] = r["Importe"]
+                ws[f"I{f_deb}"].number_format = '"$ "#,##0.00'
+                ws[f"I{f_deb}"].fill = fill_row_deb
+                ws[f"I{f_deb}"].border = thin_border
                 f_deb += 1
-            
+
             # Total Débitos
-            ws.merge_cells(f"E{f_deb}:F{f_deb}")
-            ws[f"E{f_deb}"] = "TOTAL DÉBITOS"
-            ws[f"E{f_deb}"].font = Font(bold=True)
-            ws[f"E{f_deb}"].alignment = Alignment(horizontal='right')
-            ws[f"E{f_deb}"].fill = fill_col_deb
-            ws[f"E{f_deb}"].border = thin_border
-            
-            ws[f"G{f_deb}"] = f"=SUM(G{start_d}:G{f_deb-1})"
-            ws[f"G{f_deb}"].number_format = '"$ "#,##0.00'
-            ws[f"G{f_deb}"].font = Font(bold=True)
-            ws[f"G{f_deb}"].fill = fill_col_deb
-            ws[f"G{f_deb}"].border = thin_border
+            ws.merge_cells(f"F{f_deb}:H{f_deb}")
+            ws[f"F{f_deb}"] = "TOTAL DÉBITOS"
+            ws[f"F{f_deb}"].font = Font(bold=True)
+            ws[f"F{f_deb}"].alignment = Alignment(horizontal='right')
+            ws[f"F{f_deb}"].fill = fill_col_deb
+            ws[f"F{f_deb}"].border = thin_border
+
+            ws[f"I{f_deb}"] = f"=SUM(I{start_d}:I{f_deb-1})"
+            ws[f"I{f_deb}"].number_format = '"$ "#,##0.00'
+            ws[f"I{f_deb}"].font = Font(bold=True)
+            ws[f"I{f_deb}"].fill = fill_col_deb
+            ws[f"I{f_deb}"].border = thin_border
             f_deb += 1
 
         f_ini = "B3"
-        f_tot_cred = f"C{f_cred-1}" if not creditos.empty else "0"
-        f_tot_deb = f"G{f_deb-1}" if not debitos.empty else "0"
+        f_tot_cred = f"D{f_cred-1}" if not creditos.empty else "0"
+        f_tot_deb = f"I{f_deb-1}" if not debitos.empty else "0"
         f_fin = "B4"
         
         ws["D7"] = f"=ROUND({f_ini}+{f_tot_cred}-{f_tot_deb}-{f_fin}, 2)"
@@ -469,12 +480,14 @@ def procesar_credicoop(archivo_pdf):
         ws.conditional_formatting.add('D7', CellIsRule(operator='notEqual', formula=['0'], stopIfTrue=True, fill=red_fill, font=red_font))
 
         ws.column_dimensions["A"].width = 12
-        ws.column_dimensions["B"].width = 40
-        ws.column_dimensions["C"].width = 18
-        ws.column_dimensions["D"].width = 25
-        ws.column_dimensions["E"].width = 12
-        ws.column_dimensions["F"].width = 40
-        ws.column_dimensions["G"].width = 18
+        ws.column_dimensions["B"].width = 14
+        ws.column_dimensions["C"].width = 40
+        ws.column_dimensions["D"].width = 18
+        ws.column_dimensions["E"].width = 4
+        ws.column_dimensions["F"].width = 12
+        ws.column_dimensions["G"].width = 14
+        ws.column_dimensions["H"].width = 40
+        ws.column_dimensions["I"].width = 18
 
         wb.save(output)
         output.seek(0)
