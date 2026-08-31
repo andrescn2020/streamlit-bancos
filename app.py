@@ -26,11 +26,13 @@ from patagonia import procesar_patagonia
 from patagonia_2 import procesar_patagonia_formato_2
 from patagonia_3 import procesar_patagonia_formato_3
 from brubank import procesar_brubank
+from sol import procesar_sol
 
 st.set_page_config(page_title="Movimientos Bancos", page_icon="🏦")
 
 # Lista de bancos (orden alfabético)
 bancos = [
+    "Banco del Sol",
     "BBVA Frances",
     "Brubank",
     "Ciudad",
@@ -117,6 +119,8 @@ def procesar_banco(banco_seleccionado, archivo_pdf):
         return procesar_patagonia_formato_2(archivo_pdf)
     elif banco_seleccionado == "Patagonia (Formato 3)":
         return procesar_patagonia_formato_3(archivo_pdf)
+    elif banco_seleccionado == "Banco del Sol":
+        return procesar_sol(archivo_pdf)
     else:
         st.info(f"Lógica para {banco_seleccionado} aún no implementada")
         return None
